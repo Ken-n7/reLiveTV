@@ -10,8 +10,11 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart' show timeDilation;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:tv_channels/catalog.dart';
+import 'package:tv_channels/failover.dart';
 import 'package:tv_channels/main.dart' as app;
 import 'package:tv_channels/player.dart';
+import 'package:tv_channels/settings.dart';
 
 Future<void> waitFor(WidgetTester t, Finder f, {int seconds = 90}) async {
   for (var i = 0; i < seconds * 5; i++) {
@@ -139,5 +142,95 @@ void main() {
     await resize(t, const Size(1300, 760));
     await shot(t, 'expanded-bigtext');
     // reaching here without a "RenderFlex overflowed" error is the check
+    t.platformDispatcher.clearTextScaleFactorTestValue();
+
+    // ---- failover: a dead source (connection refused) is retried 3x, then the next source
+    const dead = 'http://127.0.0.1:9/dead.m3u8';
+    await prefs.remove('failedStreams'); // earlier runs remembered the dead URL (tried last for 24 h)
+    final real = app.store.catalog.value!.channels.firstWhere((c) => c.id == 'PremierSports2.ph', orElse: () => app.store.catalog.value!.channels.first);
+    final mixed = Channel(id: null, name: 'Failover test', streams: [StreamSource(url: dead, quality: '2160p'), ...real.streams]);
+    openChannel(mixed);
+    final seen = <String>{};
+    for (var i = 0; i < 90 && playback.sourceNumber < 2; i++) {
+      seen.add('${playback.status.name} ${playback.attempt}');
+      await wait(t, 500);
+    }
+    expect(seen, containsAll(['retrying 2', 'retrying 3']), reason: 'retried the dead source before moving on');
+    expect(playback.sourceNumber, 2, reason: 'moved to the next source');
+    expect(recentlyFailed(), contains(dead), reason: 'remembered on this device');
+    expect(orderSources(mixed.streams, recentlyFailed()).last, 0, reason: 'so next time it is tried last');
+    await shot(t, 'failover-next');
+    for (var i = 0; i < 40 && playback.status != PlayStatus.playing; i++) {
+      await wait(t, 500);
+    }
+    // ignore: avoid_print
+    print('real source after failover: ${playback.status.name}');
+    navigatorKey.currentState!.maybePop();
+    await wait(t, 800);
+    playback.close();
+
+    // ---- only dead sources: ends with a clear message and Try again
+    openChannel(Channel(id: null, name: 'Dead test', streams: [StreamSource(url: dead)]));
+    for (var i = 0; i < 90 && playback.status != PlayStatus.failed; i++) {
+      await wait(t, 500);
+    }
+    expect(playback.status, PlayStatus.failed);
+    await waitFor(t, find.text('Try again'));
+    expect(find.textContaining("isn't responding"), findsOneWidget);
+    await shot(t, 'failed');
+    navigatorKey.currentState!.maybePop();
+    await wait(t, 800);
+    playback.close();
+
+    // ---- leaving the app: background play off → pause and resume; on → keep playing
+    // while hidden Flutter draws no frames, so wait on the clock, not on pump()
+    Future<void> leave() async {
+      for (final st in [AppLifecycleState.inactive, AppLifecycleState.hidden]) {
+        t.binding.handleAppLifecycleStateChanged(st);
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+    }
+    Future<void> comeBack() async {
+      for (final st in [AppLifecycleState.inactive, AppLifecycleState.resumed]) {
+        t.binding.handleAppLifecycleStateChanged(st);
+      }
+      await wait(t, 1500);
+    }
+    openChannel(real);
+    for (var i = 0; i < 60 && playback.status != PlayStatus.playing; i++) {
+      await wait(t, 500);
+    }
+    if (playback.status == PlayStatus.playing) {
+      expect(backgroundPlay.value, isFalse, reason: 'off by default');
+      await leave();
+      expect(playback.player.state.playing, isFalse, reason: 'paused when the app is hidden');
+      await Future<void>.delayed(const Duration(seconds: 17)); // longer than the stall limit: must not count as a failure
+      expect(playback.status, PlayStatus.playing);
+      await comeBack();
+      expect(playback.player.state.playing, isTrue, reason: 'resumes on return');
+      backgroundPlay.value = true;
+      await leave();
+      expect(playback.player.state.playing, isTrue, reason: 'background play keeps going');
+      await comeBack();
+      backgroundPlay.value = false;
+    } else {
+      // ignore: avoid_print
+      print('SKIPPED background checks: real stream did not start (${playback.status.name})');
+    }
+    navigatorKey.currentState!.maybePop();
+    await wait(t, 800);
+    playback.close();
+
+    // ---- settings sheet
+    await t.tap(find.byTooltip('Settings').hitTestable().first);
+    await waitFor(t, find.text('Background play'));
+    await shot(t, 'settings');
+    await t.tap(find.text('Background play'));
+    await wait(t, 500);
+    expect(backgroundPlay.value, isTrue);
+    expect(prefs.getBool('backgroundPlay'), isTrue, reason: 'saved on the device');
+    await t.tap(find.text('Background play'));
+    await wait(t, 500);
+    expect(backgroundPlay.value, isFalse);
   });
 }

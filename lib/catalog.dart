@@ -88,6 +88,12 @@ class Channel {
     List<StreamSource>? streams,
   }) : streams = streams ?? [];
 
+  /// iptv-org labels that apply to every source of this channel (shown as badges).
+  List<String> get badges => [
+    if (streams.isNotEmpty && streams.every((s) => s.part247)) 'Not 24/7',
+    if (streams.isNotEmpty && streams.every((s) => s.geoBlocked)) 'Geo-blocked',
+  ];
+
   /// Lower-cased text the search box matches against.
   late final String searchText = [name, ...altNames, ?network, ...owners, ?countryName, ...areas, ...languages].join('\n').toLowerCase();
 

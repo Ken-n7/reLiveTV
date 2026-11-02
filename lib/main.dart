@@ -3,15 +3,18 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'catalog.dart';
 import 'data.dart';
 import 'layout.dart';
 import 'motion.dart';
+import 'platform.dart';
 import 'player.dart';
+import 'settings.dart';
 
 const appName = 'reLiveTV';
+/// Set by release builds (--dart-define=APP_VERSION=1.2.0).
+const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '0.1.0-dev');
 const bg = Color(0xFF141414);
 const card = Color(0xFF2A2A2A);
 
@@ -25,13 +28,12 @@ class Wordmark extends StatelessWidget {
 
 /// Keys of channels in My List, saved on the device.
 final saved = ValueNotifier<Set<String>>({});
-late final SharedPreferences _prefs;
 
 void toggleSaved(Channel c) {
   final next = {...saved.value};
   if (!next.remove(c.key)) next.add(c.key);
   saved.value = next;
-  _prefs.setStringList('saved', next.toList());
+  prefs.setStringList('saved', next.toList());
 }
 
 /// "+ My List" / "✓ My List" button that stays in sync everywhere.
@@ -64,14 +66,15 @@ class MyListButton extends StatelessWidget {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
-  _prefs = await SharedPreferences.getInstance();
-  saved.value = {...?_prefs.getStringList('saved')};
+  await initSettings();
+  saved.value = {...?prefs.getStringList('saved')};
   // decode logos at card size and keep the in-memory image cache modest
   PaintingBinding.instance.imageCache
     ..maximumSize = 300
     ..maximumSizeBytes = 50 << 20;
   store.catalog.addListener(_followRenames);
   unawaited(store.start());
+  initPlatform();
   runApp(MaterialApp(
     title: appName,
     debugShowCheckedModeBanner: false,
@@ -93,7 +96,16 @@ Future<void> main() async {
       }),
     ),
     navigatorKey: navigatorKey,
-    builder: (context, child) => Stack(children: [child!, const MiniPlayer()]),
+    builder: (context, child) => ValueListenableBuilder(
+      valueListenable: inPip,
+      // picture-in-picture: only the video; the app stays alive underneath (Offstage keeps state)
+      builder: (context, pip, _) => Stack(
+        children: [
+          Offstage(offstage: pip, child: child),
+          if (pip) const ColoredBox(color: Colors.black, child: SizedBox.expand(child: PipVideo())) else const MiniPlayer(),
+        ],
+      ),
+    ),
     home: const HomePage(),
   ));
 }
@@ -106,7 +118,7 @@ void _followRenames() {
   final next = {for (final k in saved.value) renames[k] ?? k};
   if (next.length == saved.value.length && next.containsAll(saved.value)) return;
   saved.value = next;
-  _prefs.setStringList('saved', next.toList());
+  prefs.setStringList('saved', next.toList());
 }
 
 class HomePage extends StatefulWidget {
@@ -251,9 +263,7 @@ class MyListScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Wordmark(),
-      ),
+      appBar: AppBar(title: const Wordmark(), actions: const [SettingsButton()]),
       body: ValueListenableBuilder(
         valueListenable: saved,
         builder: (context, keys, _) {
@@ -347,6 +357,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
             tooltip: 'Search',
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SearchPage(cat))),
           ),
+          const SettingsButton(),
         ],
       ),
       body: ListView(padding: EdgeInsets.zero, children: [
@@ -436,13 +447,27 @@ class _ChannelCardState extends State<ChannelCard> {
             ),
             child: AspectRatio(
               aspectRatio: 16 / 9,
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Center(
-                  child: c.logo == null
-                      ? Text(c.name, textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold))
-                      : Image.network(c.logo!, fit: BoxFit.contain, cacheWidth: 360, frameBuilder: fadeInFrame, errorBuilder: (_, _, _) => const Icon(Icons.live_tv, size: 40)),
-                ),
+              child: Stack(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Center(
+                      child: c.logo == null
+                          ? Text(c.name, textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold))
+                          : Image.network(c.logo!, fit: BoxFit.contain, cacheWidth: 360, frameBuilder: fadeInFrame, errorBuilder: (_, _, _) => const Icon(Icons.live_tv, size: 40)),
+                    ),
+                  ),
+                  if (c.badges.isNotEmpty)
+                    Positioned(
+                      top: 6,
+                      left: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(3)),
+                        child: Text(c.badges.join(' · '), style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -554,5 +579,73 @@ class CardGrid extends StatelessWidget {
         },
       );
     });
+  }
+}
+
+class SettingsButton extends StatelessWidget {
+  const SettingsButton({super.key});
+  @override
+  Widget build(BuildContext context) => IconButton(
+    icon: const Icon(Icons.settings_outlined),
+    tooltip: 'Settings',
+    onPressed: () => showModalBottomSheet(context: context, showDragHandle: true, builder: (_) => const SettingsSheet()),
+  );
+}
+
+/// Everything here is stored on this device only.
+class SettingsSheet extends StatelessWidget {
+  const SettingsSheet({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ValueListenableBuilder(
+              valueListenable: backgroundPlay,
+              builder: (_, on, _) => SwitchListTile(
+                title: const Text('Background play'),
+                subtitle: const Text('Keep playing when you leave the app. On Android: picture-in-picture for video, a notification for audio. Uses more battery and data.'),
+                value: on,
+                onChanged: (v) {
+                  backgroundPlay.value = v;
+                  if (v) requestNotificationPermission();
+                },
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.cleaning_services_outlined),
+              title: const Text('Clear cache'),
+              subtitle: const Text('Saved channel list and images. Your list and settings stay.'),
+              onTap: () async {
+                await store.clear();
+                PaintingBinding.instance.imageCache.clear();
+                if (!context.mounted) return;
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cache cleared. The channel list downloads again next launch.')));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('About reLiveTV'),
+              subtitle: const Text('Version $appVersion'),
+              onTap: () => showAboutDialog(
+                context: context,
+                applicationName: appName,
+                applicationVersion: appVersion,
+                applicationLegalese: 'Channel data comes from iptv-org (github.com/iptv-org), released into the public domain.',
+                children: const [
+                  SizedBox(height: 12),
+                  Text('reLiveTV hosts no streams. It shows links that iptv-org lists publicly and plays them on your device.'),
+                  SizedBox(height: 8),
+                  Text('No accounts, no tracking. Your list and settings stay on this device.'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

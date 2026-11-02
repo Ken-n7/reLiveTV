@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -6,38 +7,57 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'catalog.dart';
+import 'failover.dart';
 import 'layout.dart';
 import 'main.dart' show MyListButton, card, channelSubtitle;
 import 'motion.dart';
+import 'settings.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 
+enum PlayStatus { connecting, playing, retrying, failed, noStreams }
+
 /// One player for the whole app, so playback survives leaving the channel
-/// page and continues in the mini player.
+/// page and continues in the mini player. Retries and fails over between a
+/// channel's sources before telling the viewer it isn't responding.
 class Playback extends ChangeNotifier {
-  late final player = Player(); // created on first play, after MediaKit init
+  late final player = Player(
+    configuration: const PlayerConfiguration(
+      // live TV doesn't need a big buffer; less memory
+      bufferSize: 16 << 20,
+      // security: only what network streams need. The default also allows file:, udp, rtp —
+      // a crowd-edited playlist must never make the player read local files.
+      protocolWhitelist: ['http', 'https', 'tls', 'tcp', 'crypto', 'data'],
+    ),
+  ); // created on first play, after MediaKit init
   late final video = VideoController(player);
   Channel? channel;
   int streamIndex = 0;
-  String? error;
+  PlayStatus status = PlayStatus.connecting;
   List<VideoTrack> qualities = []; // one per HLS variant, highest first
   VideoTrack? quality; // null = auto
   bool mini = false;
-  bool _listening = false;
+
+  Failover? _failover;
+  Timer? _watchdog, _retry;
+  Duration _lastPos = Duration.zero;
+  DateTime _lastProgress = DateTime.now();
+  bool _started = false, _hadError = false, _listening = false, _suspended = false;
+
+  int get attempt => _failover?.attempt ?? 1;
+  int get sourceNumber => _failover?.sourceNumber ?? 1;
 
   void _listen() {
     if (_listening) return;
     _listening = true;
-    player.stream.error.listen((e) {
-      error = e;
-      notifyListeners();
-    });
-    // mpv also reports non-fatal errors (a bad segment, a subtitle track); if playback moves, it works
-    player.stream.position.listen((_) {
-      if (error == null) return;
-      error = null;
-      notifyListeners();
-    });
+    final native = player.platform;
+    if (native is NativePlayer) {
+      // no youtube-dl/yt-dlp hand-off and no user scripts: nothing outside the stream runs
+      native.setProperty('ytdl', 'no');
+      native.setProperty('load-scripts', 'no');
+    }
+    // mpv also reports non-fatal errors (a bad segment, a subtitle track): note it, let the watchdog decide
+    player.stream.error.listen((_) => _hadError = true);
     player.stream.tracks.listen((t) {
       // mpv lists each HLS variant as its own video track; keep the best bitrate per height
       final byHeight = <int, VideoTrack>{};
@@ -51,20 +71,99 @@ class Playback extends ChangeNotifier {
     });
   }
 
-  void play(Channel c, [int index = 0]) {
+  /// Starts [c] from its best source (or [index], when the viewer picked one).
+  void play(Channel c, [int? index]) {
     _listen();
+    _stopTimers();
     channel = c;
-    streamIndex = index;
-    error = null;
     qualities = [];
     quality = null;
-    notifyListeners();
     if (c.streams.isEmpty) {
+      status = PlayStatus.noStreams;
       player.stop();
+      notifyListeners();
       return;
     }
-    final s = c.streams[index];
+    _failover = Failover(orderSources(c.streams, recentlyFailed()));
+    if (index != null) _failover!.jumpTo(index);
+    _open(_failover!.current, PlayStatus.connecting);
+  }
+
+  /// Viewer picked a source chip.
+  void playSource(int index) {
+    if (channel == null) return;
+    _retry?.cancel();
+    _failover?.jumpTo(index);
+    _open(index, PlayStatus.connecting);
+  }
+
+  void _open(int index, PlayStatus st) {
+    final s = channel!.streams[index];
+    streamIndex = index;
+    status = st;
+    _started = false;
+    _hadError = false;
+    // baseline: the player may still report the previous stream's position for a moment
+    _lastPos = player.state.position;
+    _lastProgress = DateTime.now();
+    notifyListeners();
     player.open(Media(s.url, httpHeaders: s.headers));
+    _watchdog ??= Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+  }
+
+  /// Paused because the app went to the background: not a stall.
+  void suspend(bool v) {
+    _suspended = v;
+    _lastProgress = DateTime.now();
+  }
+
+  void _tick() {
+    if (_suspended || (_retry?.isActive ?? false)) return; // backgrounded, or waiting before the next attempt
+    final pos = player.state.position;
+    if (pos > Duration.zero && pos != _lastPos && player.state.playing) {
+      _lastPos = pos;
+      _lastProgress = DateTime.now();
+      if (status != PlayStatus.playing) {
+        _started = true;
+        _hadError = false;
+        status = PlayStatus.playing;
+        _failover?.succeeded();
+        notifyListeners();
+      }
+      return;
+    }
+    if (_started && !player.state.playing) {
+      _lastProgress = DateTime.now(); // paused on purpose: not a stall
+      return;
+    }
+    final limit = Duration(seconds: _hadError ? 6 : 15);
+    if (DateTime.now().difference(_lastProgress) > limit) _failed();
+  }
+
+  void _failed() {
+    final failedUrl = channel!.streams[streamIndex].url;
+    switch (_failover!.failed()) {
+      case RetrySame(:final delay):
+        status = PlayStatus.retrying;
+        player.stop();
+        notifyListeners();
+        _retry = Timer(delay, () => _open(streamIndex, PlayStatus.retrying));
+      case NextSource(:final index):
+        rememberFailed(failedUrl);
+        _open(index, PlayStatus.retrying);
+      case GiveUp():
+        rememberFailed(failedUrl);
+        _stopTimers();
+        status = PlayStatus.failed;
+        player.stop();
+        notifyListeners();
+    }
+  }
+
+  void _stopTimers() {
+    _watchdog?.cancel();
+    _retry?.cancel();
+    _watchdog = _retry = null;
   }
 
   void setQuality(VideoTrack? q) {
@@ -79,6 +178,7 @@ class Playback extends ChangeNotifier {
   }
 
   void close() {
+    _stopTimers();
     channel = null;
     mini = false;
     player.stop();
@@ -317,22 +417,7 @@ class _PlayerPageState extends State<PlayerPage> {
           fit: StackFit.expand,
           children: [
             Video(key: _videoKey, controller: playback.video),
-            if (c.streams.isEmpty)
-              const IgnorePointer(
-                child: ColoredBox(
-                  color: Colors.black87,
-                  child: Center(child: Text('No streams for this channel.')),
-                ),
-              )
-            else if (playback.error != null)
-              IgnorePointer(
-                child: Container(
-                  color: Colors.black87,
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.all(16),
-                  child: Text('This stream is not working right now.${c.streams.length > 1 ? '\nTry another source below.' : ''}', textAlign: TextAlign.center),
-                ),
-              ),
+            StatusOverlay(c),
           ],
         ),
       ),
@@ -383,9 +468,9 @@ class _PlayerPageState extends State<PlayerPage> {
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: ChoiceChip(
-                        label: Text('Source ${i + 1}${c.streams[i].quality == null ? '' : ' · ${c.streams[i].quality}'}'),
+                        label: Text(['Source ${i + 1}', ?c.streams[i].quality, ...c.streams[i].labels].join(' · ')),
                         selected: playback.streamIndex == i,
-                        onSelected: (_) => playback.play(c, i),
+                        onSelected: (_) => playback.playSource(i),
                       ),
                     ),
                 ],
@@ -396,6 +481,76 @@ class _PlayerPageState extends State<PlayerPage> {
       ),
     );
   }
+}
+
+/// Over the video: a small note while reconnecting; a message + Try again once
+/// every source has failed every attempt.
+class StatusOverlay extends StatelessWidget {
+  final Channel c;
+  const StatusOverlay(this.c, {super.key});
+  @override
+  Widget build(BuildContext context) {
+    switch (playback.status) {
+      case PlayStatus.noStreams:
+        return const IgnorePointer(
+          child: ColoredBox(color: Colors.black87, child: Center(child: Text('No streams for this channel.'))),
+        );
+      case PlayStatus.failed:
+        final n = c.streams.length;
+        return ColoredBox(
+          color: Colors.black87,
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text("This channel isn't responding right now.", textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Tried ${n == 1 ? 'its source' : 'all $n sources'}, ${Failover.attemptsPerSource} times each.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white60, fontSize: 13),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+                    onPressed: () => playback.play(c),
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Try again'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      case PlayStatus.retrying:
+        final n = c.streams.length;
+        return IgnorePointer(
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: Container(
+              margin: const EdgeInsets.only(top: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(16)),
+              child: Text(
+                'Reconnecting… try ${playback.attempt} of ${Failover.attemptsPerSource}${n > 1 ? ' · source ${playback.sourceNumber} of $n' : ''}',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+          ),
+        );
+      case PlayStatus.connecting || PlayStatus.playing:
+        return const SizedBox.shrink();
+    }
+  }
+}
+
+/// The video alone, for Android's picture-in-picture window.
+class PipVideo extends StatelessWidget {
+  const PipVideo({super.key});
+  @override
+  Widget build(BuildContext context) => Video(controller: playback.video, controls: NoVideoControls);
 }
 
 /// Floating player shown above every screen while a channel is minimized.
