@@ -355,3 +355,28 @@ Catalog buildCatalog(String Function(String name) read) {
     builtAt: DateTime.now().toUtc(),
   );
 }
+
+/// What Discover shows for a search and filters. Every typed word must match
+/// (name, other names, network, owners, country, broadcast area, language).
+/// Names starting with the query come first, then names containing it.
+List<Channel> filterChannels(Catalog cat, {String query = '', String? country, String? region, String? language, String? category}) {
+  final q = query.trim().toLowerCase();
+  final words = q.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+  final inRegion = region == null ? null : {...?cat.regions.where((r) => r.code == region).firstOrNull?.countries};
+  final hits = [
+    for (final c in cat.channels)
+      if ((country == null || c.countryCode == country) &&
+          (inRegion == null || inRegion.contains(c.countryCode)) &&
+          (language == null || c.languages.contains(language)) &&
+          (category == null || c.categories.contains(category)) &&
+          words.every(c.searchText.contains))
+        c,
+  ];
+  if (q.isEmpty) return hits;
+  int rank(Channel c) {
+    final n = c.name.toLowerCase();
+    return n.startsWith(q) ? 0 : (n.contains(q) ? 1 : 2);
+  }
+
+  return hits..sort((a, b) => rank(a) - rank(b)); // List.sort is stable enough here: ties keep A–Z order
+}

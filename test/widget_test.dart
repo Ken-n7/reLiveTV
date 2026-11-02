@@ -110,6 +110,34 @@ void main() {
     expect(c.timezoneOffsets, {'Asia/Manila': 480, 'America/New_York': -300});
   });
 
+  test('search and filters', () {
+    final c = build();
+    List<String> names(List<Channel> l) => [for (final ch in l) ch.name];
+    expect(names(filterChannels(c)), ['Alpha', 'Loose', 'New'], reason: 'no filters: everything');
+    expect(names(filterChannels(c, query: 'alp')), ['Alpha']);
+    expect(names(filterChannels(c, query: 'owner co')), ['Alpha', 'New'], reason: 'all words must match, any field');
+    expect(names(filterChannels(c, query: 'california')), ['New'], reason: 'broadcast area (subdivision)');
+    expect(names(filterChannels(c, query: 'filipino')), ['Alpha'], reason: 'language');
+    expect(names(filterChannels(c, country: 'US')), ['New']);
+    expect(names(filterChannels(c, region: 'ASIA')), ['Alpha']);
+    expect(names(filterChannels(c, language: 'English', category: 'News')), ['Alpha']);
+    expect(filterChannels(c, query: 'zzz'), isEmpty);
+  });
+
+  test('search ranks names starting with the query first', () {
+    final cat = Catalog(
+      channels: [Channel(id: 'a', name: 'Best News', network: 'Sun'), Channel(id: 'b', name: 'Sun TV'), Channel(id: 'c', name: 'Morning Sun')],
+      countryInfo: const {},
+      categories: const [],
+      languages: const [],
+      regions: const [],
+      timezoneOffsets: const {},
+      replacedBy: const {},
+      builtAt: DateTime(2026),
+    );
+    expect([for (final c in filterChannels(cat, query: 'sun')) c.name], ['Sun TV', 'Morning Sun', 'Best News']);
+  });
+
   test('compact catalog round-trips', () {
     final c = build();
     final back = Catalog.fromJsonString(c.toJsonString());
