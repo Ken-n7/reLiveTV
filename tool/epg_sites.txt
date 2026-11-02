@@ -14,7 +14,9 @@ tv.blue.ch
 sky.com
 mi.tv
 m.tv.sms.cz
-tvtv.us
+# tvtv.us removed 2026-11-02: blocks every scraper (HTTP 403), even from home connections
+tvpassport.com
+tvguide.com
 tv.mail.ru
 gatotv.com
 tvprofil.com
@@ -23,3 +25,4 @@ teleboy.ch
 programtv.onet.pl
 xumo.tv
 programetv.ro
+ontvtonight.com
