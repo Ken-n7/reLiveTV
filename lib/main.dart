@@ -1,14 +1,12 @@
-import 'dart:convert';
+import 'dart:async';
 import 'dart:math';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'catalog.dart';
+import 'data.dart';
 import 'layout.dart';
 import 'motion.dart';
 import 'player.dart';
@@ -68,6 +66,12 @@ Future<void> main() async {
   MediaKit.ensureInitialized();
   _prefs = await SharedPreferences.getInstance();
   saved.value = {...?_prefs.getStringList('saved')};
+  // decode logos at card size and keep the in-memory image cache modest
+  PaintingBinding.instance.imageCache
+    ..maximumSize = 300
+    ..maximumSizeBytes = 50 << 20;
+  store.catalog.addListener(_followRenames);
+  unawaited(store.start());
   runApp(MaterialApp(
     title: appName,
     debugShowCheckedModeBanner: false,
@@ -94,16 +98,15 @@ Future<void> main() async {
   ));
 }
 
-Future<Catalog> loadCatalog() async {
-  final bodies = await Future.wait(apiFiles.map((f) async {
-    final r = await http.get(Uri.parse('$apiBase/$f.json'));
-    if (r.statusCode != 200) throw Exception('$f.json: HTTP ${r.statusCode}');
-    return MapEntry(f, r.body);
-  }));
-  // live-stream list from tool/check_streams.py, bundled at build time
-  final alive = jsonDecode(await rootBundle.loadString('assets/alive.json'))['urls'] as List;
-  // ponytail: refetches ~15 MB every launch; cache to disk if startup gets slow
-  return compute(buildCatalog, {...Map.fromEntries(bodies), 'alive': jsonEncode(alive)});
+final store = CatalogStore();
+
+/// Saved channels that iptv-org renamed/replaced follow the new id.
+void _followRenames() {
+  final renames = store.catalog.value?.replacedBy ?? const {};
+  final next = {for (final k in saved.value) renames[k] ?? k};
+  if (next.length == saved.value.length && next.containsAll(saved.value)) return;
+  saved.value = next;
+  _prefs.setStringList('saved', next.toList());
 }
 
 class HomePage extends StatefulWidget {
@@ -113,37 +116,43 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  late Future<Catalog> _future = loadCatalog();
-
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<Catalog>(
-      future: _future,
-      builder: (context, snap) => AnimatedSwitcher(
-        duration: motion(context, Durations.medium2),
-        child: _body(snap),
-      ),
+    return ListenableBuilder(
+      listenable: Listenable.merge([store.catalog, store.error]),
+      builder: (context, _) => AnimatedSwitcher(duration: motion(context, Durations.medium2), child: _body()),
     );
   }
 
-  Widget _body(AsyncSnapshot<Catalog> snap) {
-        if (snap.hasError) {
-          return Scaffold(
-            key: const ValueKey('error'),
-            body: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Text('Could not load channels.\n${snap.error}', textAlign: TextAlign.center),
-                  const SizedBox(height: 12),
-                  FilledButton(onPressed: () => setState(() => _future = loadCatalog()), child: const Text('Retry')),
-                ]),
-              ),
-            ),
-          );
-        }
-        if (!snap.hasData) return const Scaffold(key: ValueKey('loading'), body: Center(child: CircularProgressIndicator(color: Colors.white)));
-        return AppShell(snap.data!, key: const ValueKey('app'));
+  Widget _body() {
+    final cat = store.catalog.value;
+    if (cat != null) return AppShell(cat, key: const ValueKey('app'));
+    if (store.error.value != null) {
+      return Scaffold(
+        key: const ValueKey('error'),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text("Couldn't load channels. Check your connection.", textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              FilledButton(onPressed: store.refresh, child: const Text('Retry')),
+            ]),
+          ),
+        ),
+      );
+    }
+    // first launch only: a thin white bar while the channel list downloads
+    return const Scaffold(
+      key: ValueKey('loading'),
+      backgroundColor: Colors.black,
+      body: Center(
+        child: SizedBox(
+          width: 160,
+          child: LinearProgressIndicator(minHeight: 2, color: Colors.white, backgroundColor: Colors.white12),
+        ),
+      ),
+    );
   }
 }
 
@@ -304,22 +313,24 @@ class DiscoverScreen extends StatefulWidget {
 }
 
 class _DiscoverScreenState extends State<DiscoverScreen> {
-  late final List<(String, List<Channel>)> rows;
+  late List<(String, List<Channel>)> rows = _rows(widget.cat);
 
   @override
-  void initState() {
-    super.initState();
-    final all = widget.cat.channels;
+  void didUpdateWidget(DiscoverScreen old) {
+    super.didUpdateWidget(old);
+    if (old.cat != widget.cat) rows = _rows(widget.cat); // the daily refresh brought a new catalog
+  }
 
+  static List<(String, List<Channel>)> _rows(Catalog cat) {
     final byCategory = <String, List<Channel>>{};
-    for (final c in all) {
+    for (final c in cat.channels) {
       for (final k in c.categories) {
         (byCategory[k] ??= []).add(c);
       }
     }
     // logos first so rows look full, biggest categories first
     int logoFirst(Channel a, Channel b) => (a.logo == null ? 1 : 0) - (b.logo == null ? 1 : 0);
-    rows = [
+    return [
       for (final e in byCategory.entries.toList()..sort((a, b) => b.value.length - a.value.length)) (e.key, e.value..sort(logoFirst)),
     ];
   }
