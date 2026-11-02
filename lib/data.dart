@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import 'catalog.dart';
+import 'platform.dart';
 
 /// The channel catalog on this device. Starts instantly from the saved compact copy;
 /// re-downloads iptv-org's files at most once a day (they publish once a day).
@@ -119,8 +119,6 @@ class CatalogStore {
     }
   }
 }
-
-const platform = MethodChannel('relivetv/platform');
 
 /// Folder for re-downloadable data: Android's app-private cache dir, else the
 /// XDG cache dir (~/.cache/relivetv on Linux).

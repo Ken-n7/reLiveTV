@@ -42,7 +42,7 @@ class Playback extends ChangeNotifier {
   Timer? _watchdog, _retry;
   Duration _lastPos = Duration.zero;
   DateTime _lastProgress = DateTime.now();
-  bool _started = false, _hadError = false, _listening = false;
+  bool _started = false, _hadError = false, _listening = false, _suspended = false;
 
   int get attempt => _failover?.attempt ?? 1;
   int get sourceNumber => _failover?.sourceNumber ?? 1;
@@ -103,17 +103,24 @@ class Playback extends ChangeNotifier {
     status = st;
     _started = false;
     _hadError = false;
-    _lastPos = Duration.zero;
+    // baseline: the player may still report the previous stream's position for a moment
+    _lastPos = player.state.position;
     _lastProgress = DateTime.now();
     notifyListeners();
     player.open(Media(s.url, httpHeaders: s.headers));
     _watchdog ??= Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
+  /// Paused because the app went to the background: not a stall.
+  void suspend(bool v) {
+    _suspended = v;
+    _lastProgress = DateTime.now();
+  }
+
   void _tick() {
-    if (_retry?.isActive ?? false) return; // waiting before the next attempt
+    if (_suspended || (_retry?.isActive ?? false)) return; // backgrounded, or waiting before the next attempt
     final pos = player.state.position;
-    if (pos > Duration.zero && pos != _lastPos) {
+    if (pos > Duration.zero && pos != _lastPos && player.state.playing) {
       _lastPos = pos;
       _lastProgress = DateTime.now();
       if (status != PlayStatus.playing) {
@@ -537,6 +544,13 @@ class StatusOverlay extends StatelessWidget {
         return const SizedBox.shrink();
     }
   }
+}
+
+/// The video alone, for Android's picture-in-picture window.
+class PipVideo extends StatelessWidget {
+  const PipVideo({super.key});
+  @override
+  Widget build(BuildContext context) => Video(controller: playback.video, controls: NoVideoControls);
 }
 
 /// Floating player shown above every screen while a channel is minimized.
