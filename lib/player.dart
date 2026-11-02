@@ -12,6 +12,7 @@ import 'failover.dart';
 import 'layout.dart';
 import 'main.dart' show MyListButton, card, channelSubtitle;
 import 'motion.dart';
+import 'schedule_view.dart';
 import 'settings.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
@@ -511,6 +512,7 @@ class _PlayerPageState extends State<PlayerPage> {
               MyListButton(c),
             ],
           ),
+          ScheduleCard(c),
           if (c.streams.length > 1) ...[
             const SizedBox(height: 14),
             SingleChildScrollView(

@@ -11,6 +11,7 @@ import 'layout.dart';
 import 'motion.dart';
 import 'platform.dart';
 import 'player.dart';
+import 'schedule.dart';
 import 'settings.dart';
 import 'update.dart';
 
@@ -88,6 +89,7 @@ Future<void> main() async {
   store.catalog.addListener(_followRenames);
   unawaited(store.start());
   initPlatform();
+  unawaited(schedules.cleanUp().then((_) {}, onError: (_) {})); // drop schedules that ran out
   // quiet daily check for a newer release (never blocks or nags; failures are ignored)
   unawaited(updates.check(appVersion).then((_) {}, onError: (_) {}));
   runApp(
