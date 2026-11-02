@@ -626,7 +626,9 @@ class UpdateBanner extends StatelessWidget {
                             onPressed: () async {
                               final messenger = ScaffoldMessenger.of(context);
                               try {
-                                await updates.install(r);
+                                if (await updates.install(r) == 'needsPermission') {
+                                  messenger.showSnackBar(const SnackBar(content: Text('Allow installing from reLiveTV, then tap Update again.')));
+                                }
                               } catch (e) {
                                 messenger.showSnackBar(SnackBar(content: Text("Update didn't install: $e")));
                               }
