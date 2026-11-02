@@ -5,11 +5,13 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(__file__))
 from epg_channels import build  # noqa: E402
-from split_epg import parse_time, split  # noqa: E402
+from split_epg import parse_time, publish, split  # noqa: E402
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 
 def test_build():
-    lines = build(
+    lines, _ = build(
         sites=["first.com", "second.com"],
         streams=[{"channel": c, "url": "https://x/" + c} for c in ("A.ph", "B.us", "Old.us", "Blocked.us")]
         + [{"channel": "Rtmp.us", "url": "rtmp://x"}],
@@ -25,15 +27,16 @@ def test_build():
             {"channel": "Gone.us", "site": "first.com", "site_id": "g"},  # no stream
         ],
     )
-    assert len(lines) == 1, lines
+    assert len(lines) == 1, lines  # both A.ph sources are Filipino: first.com wins; other.com is not a chosen site
     assert 'site="first.com"' in lines[0] and 'xmltv_id="A.ph"' in lines[0] and "A &amp; Co" in lines[0]
 
 
-def test_language_first():
+def test_languages():
     guides = [
         {"channel": "CN.us", "site": "ru-site.com", "site_id": "1", "lang": "ru"},
-        {"channel": "CN.us", "site": "mx-site.com", "site_id": "6", "lang": "es"},  # higher priority, but not the main language
+        {"channel": "CN.us", "site": "mx-site.com", "site_id": "6", "lang": "es"},
         {"channel": "CN.us", "site": "us-site.com", "site_id": "2", "lang": "en"},
+        {"channel": "CN.us", "site": "other-en.com", "site_id": "7", "lang": "en"},  # same language, lower priority
         {"channel": "Canal.mx", "site": "ru-site.com", "site_id": "3", "lang": "ru"},
         {"channel": "Canal.mx", "site": "us-site.com", "site_id": "4", "lang": "en"},
         {"channel": "Canal.mx", "site": "mx-site.com", "site_id": "5", "lang": "es"},
@@ -44,13 +47,27 @@ def test_language_first():
         {"channel": "Canal.mx", "is_main": True, "languages": ["spa"]},
     ]
     streams = [{"channel": c, "url": "https://x/" + c} for c in ("CN.us", "Canal.mx")]
-    # ru-site.com has the highest priority, but language wins
-    lines = build(["ru-site.com", "mx-site.com", "us-site.com"], streams, [], [], guides, feeds)
-    assert 'site="us-site.com"' in lines[0] and 'xmltv_id="CN.us"' in lines[0], lines  # English channel → English listings
-    assert 'xmltv_id="Canal.mx"' in lines[1] and 'site="mx-site.com"' in lines[1], lines  # Spanish channel → Spanish listings
-    # without language info, English beats other languages
-    lines = build(["ru-site.com", "us-site.com"], streams[:1], [], [], [guides[0], guides[2]], [])
-    assert 'site="us-site.com"' in lines[0], lines
+    sites = ["ru-site.com", "mx-site.com", "us-site.com", "other-en.com"]
+    lines, order = build(sites, streams, [], [], guides, feeds)
+    assert len(lines) == 6, lines  # every language once per channel
+    assert not any("other-en.com" in l for l in lines), "one site per channel and language"
+    assert order["CN.us"] == ["en", "es", "ru"], order  # main language, then other spoken, then the rest
+    assert order["Canal.mx"] == ["es", "en", "ru"], order
+    _, order = build(sites[:3], streams[:1], [], [], guides[:3], [])
+    assert order["CN.us"][0] == "en", "without language info, English first"
+
+
+def test_publish():
+    progs = [[100, 200, "Show"]]
+    by_lang = {"ru": {"CN.us": progs}, "en": {"CN.us": progs, "B.uk": progs}}
+    with tempfile.TemporaryDirectory() as d:
+        n = publish(by_lang, {"CN.us": ["en", "es", "ru"]}, Path(d), now=50)
+        assert n == 2
+        default = json.loads((Path(d) / "CN.us.json").read_text())
+        assert default["lang"] == "en" and default["langs"] == ["en", "ru"], default  # es had no listings
+        assert json.loads((Path(d) / "CN.us.ru.json").read_text())["lang"] == "ru"
+        assert json.loads((Path(d) / "B.uk.json").read_text())["langs"] == ["en"]
+        assert json.loads((Path(d) / "index.json").read_text())["channels"] == ["B.uk", "CN.us"]
 
 
 def test_split():
@@ -79,6 +96,7 @@ def test_split():
 
 if __name__ == "__main__":
     test_build()
-    test_language_first()
+    test_languages()
+    test_publish()
     test_split()
     print("ok")

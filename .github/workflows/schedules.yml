@@ -34,26 +34,28 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Channel list (channels reLiveTV can play, on the chosen sites)
-        run: python3 tool/epg_channels.py tool/epg_sites.txt channels.xml
+      - name: Channel list (channels reLiveTV can play, every language on the chosen sites)
+        run: python3 tool/epg_channels.py tool/epg_sites.txt channels.xml channel_langs.json
 
       - name: Grab schedules
         working-directory: epg
         continue-on-error: true # some sites fail on some days; keep what worked
         run: |
           npm ci --no-audit --no-fund
-          npm run grab --- --channels=../channels.xml --output=../guide.xml --days=2 --maxConnections=5 --timeout=20000
+          npm run grab --- --channels=../channels.xml --output=../guides/{lang}.xml --days=2 --maxConnections=5 --timeout=20000
 
       - name: Check output
         run: |
-          test -s guide.xml || { echo "no guide produced"; exit 1; }
-          test "$(stat -c %s guide.xml)" -lt 524288000 || { echo "guide unexpectedly large"; exit 1; }
-          grep -c '<programme' guide.xml
+          ls guides/*.xml >/dev/null 2>&1 || { echo "no guide produced"; exit 1; }
+          test "$(du -sb guides | cut -f1)" -lt 524288000 || { echo "guides unexpectedly large"; exit 1; }
+          for f in guides/*.xml; do echo "$f: $(grep -c '<programme' "$f") programmes"; done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: guide
-          path: guide.xml
+          path: |
+            guides/
+            channel_langs.json
           retention-days: 1
 
   publish:
@@ -77,7 +79,7 @@ jobs:
       - name: One file per channel
         run: |
           python3 tool/test_epg.py
-          python3 tool/split_epg.py guide.xml site 48
+          python3 tool/split_epg.py guides channel_langs.json site 48
           test "$(ls site/schedules | wc -l)" -gt 1
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

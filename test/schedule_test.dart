@@ -43,4 +43,17 @@ void main() {
     expect((ny.hour, ny.minute), (7, 30));
     expect(wallClock(utc, null), utc.toLocal(), reason: 'device time');
   });
+
+  test('schedule languages', () {
+    final d = parseScheduleFile(jsonEncode({'id': 'A.ph', 'lang': 'en', 'langs': ['en', 'tl', 'BAD!'], 'p': []}));
+    expect(d.lang, 'en');
+    expect(d.langs, ['en', 'tl'], reason: 'odd codes dropped');
+    expect(parseScheduleFile(file).langs, isEmpty, reason: 'older files have no languages');
+    expect(extraLanguage(d, null), isNull, reason: 'no preference: default only');
+    expect(extraLanguage(d, 'en'), isNull, reason: 'preference is already the default');
+    expect(extraLanguage(d, 'tl'), 'tl');
+    expect(extraLanguage(d, 'ru'), isNull, reason: 'channel has no Russian listings');
+    expect(languageName('tl'), 'Filipino');
+    expect(languageName('xx'), 'XX');
+  });
 }

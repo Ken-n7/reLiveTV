@@ -350,6 +350,17 @@ void main() {
         await shot(t, 'watch-portrait');
         await resize(t, const Size(1300, 760));
 
+        // schedule language: English by default, Filipino from the menu (and remembered)
+        await t.tap(find.byTooltip('Schedule language'));
+        await waitFor(t, find.text('Filipino'));
+        await wait(t, 500);
+        await t.tap(find.text('Filipino').last);
+        await waitFor(t, find.text('Palabas ngayon'), seconds: 15);
+        expect(scheduleLang, 'tl');
+        await shot(t, 'watch-filipino');
+        scheduleLang = null;
+        t.state(find.byType(SchedulePanel)).setState(() {}); // ignore: invalid_use_of_protected_member
+
         // time zone switch
         await t.tap(find.textContaining('Times: My time'));
         await waitFor(t, find.text("Channel's time"));

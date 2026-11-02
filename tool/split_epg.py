@@ -1,9 +1,13 @@
-"""Turns the grabbed XMLTV guide into one small JSON file per channel, which the
-app downloads only for the channel being watched.
+"""Turns the grabbed XMLTV guides (one file per language) into small JSON files per
+channel, which the app downloads only for the channel being watched.
 
-Usage: python3 tool/split_epg.py guide.xml site_dir [hours]
-Writes site_dir/schedules/<channel id>.json and site_dir/schedules/index.json.
-File format: {"id": "SMNI.ph", "updated": 1793600000, "p": [[start, stop, "title"], ...]}
+Usage: python3 tool/split_epg.py guides_dir channel_langs.json site_dir [hours]
+Reads guides_dir/<lang>.xml. Writes site_dir/schedules/:
+  <id>.<lang>.json   the channel's listings in that language
+  <id>.json          the default language (first available in channel_langs.json order)
+  index.json         {"updated": ..., "channels": [ids]}
+File format: {"id": "SMNI.ph", "updated": 1793600000, "lang": "en", "langs": ["en", "es"],
+              "p": [[start, stop, "title"], ...]}
 (start/stop in UTC seconds, sorted, only programmes not yet over and starting within `hours`).
 """
 import json
@@ -73,16 +77,37 @@ def split(guide_path, now, hours=48):
     return result
 
 
-def main(guide, site_dir, hours="48"):
-    now = int(time.time())
-    data = split(guide, now, int(hours))
-    out = Path(site_dir) / "schedules"
+LANG = re.compile(r"^[a-z]{2,3}$")
+
+
+def publish(by_lang, order, out, now):
+    """by_lang: {lang: {channel: programmes}}; order: {channel: [langs, best first]}.
+    Writes the per-language files, the default file and the index. Returns channel count."""
     out.mkdir(parents=True, exist_ok=True)
-    for cid, progs in data.items():
-        (out / f"{cid}.json").write_text(json.dumps({"id": cid, "updated": now, "p": progs}, ensure_ascii=False, separators=(",", ":")))
-    (out / "index.json").write_text(json.dumps({"updated": now, "channels": sorted(data)}, separators=(",", ":")))
-    print(f"{len(data)} channels, {sum(len(p) for p in data.values())} programmes")
+    channels = {cid for data in by_lang.values() for cid in data}
+    for cid in channels:
+        have = [l for l in by_lang if cid in by_lang[l]]
+        langs = [l for l in order.get(cid, []) if l in have] + sorted(l for l in have if l not in order.get(cid, []))
+        for lang in langs:
+            doc = {"id": cid, "updated": now, "lang": lang, "langs": langs, "p": by_lang[lang][cid]}
+            text = json.dumps(doc, ensure_ascii=False, separators=(",", ":"))
+            (out / f"{cid}.{lang}.json").write_text(text)
+            if lang == langs[0]:
+                (out / f"{cid}.json").write_text(text)  # default; also what older app versions read
+    (out / "index.json").write_text(json.dumps({"updated": now, "channels": sorted(channels)}, separators=(",", ":")))
+    return len(channels)
+
+
+def main(guides_dir, langs_file, site_dir, hours="48"):
+    now = int(time.time())
+    order = json.loads(Path(langs_file).read_text())
+    by_lang = {}
+    for f in sorted(Path(guides_dir).glob("*.xml")):
+        if LANG.match(f.stem):
+            by_lang[f.stem] = split(f, now, int(hours))
+    n = publish(by_lang, order, Path(site_dir) / "schedules", now)
+    print(f"{n} channels; " + ", ".join(f"{lang}: {len(d)}" for lang, d in sorted(by_lang.items(), key=lambda kv: -len(kv[1]))[:8]))
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:4])
+    main(*sys.argv[1:5])
