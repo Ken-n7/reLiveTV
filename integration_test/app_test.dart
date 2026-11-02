@@ -16,6 +16,7 @@ import 'package:tv_channels/discover.dart';
 import 'package:tv_channels/failover.dart';
 import 'package:tv_channels/main.dart' as app;
 import 'package:tv_channels/player.dart';
+import 'package:tv_channels/schedule.dart';
 import 'package:tv_channels/settings.dart';
 
 Future<void> waitFor(WidgetTester t, Finder f, {int seconds = 90}) async {
@@ -292,6 +293,32 @@ void main() {
     expect(label, contains(t.widget<app.ChannelCard>(find.byType(app.ChannelCard).hitTestable().first).c.name));
     sem.dispose();
     FocusManager.instance.primaryFocus?.unfocus();
+
+    // ---- TV schedule card (served by the test runner: SCHEDULE_BASE points at a local server)
+    if (const String.fromEnvironment('SCHEDULE_BASE').isNotEmpty) {
+      final smni = app.store.catalog.value!.channels.where((c) => c.id == 'SMNI.ph').firstOrNull;
+      if (smni != null) {
+        openChannel(smni);
+        await waitFor(t, find.text('NOW'), seconds: 20);
+        expect(find.text('Test show now'), findsOneWidget);
+        expect(find.textContaining('NEXT'), findsOneWidget);
+        expect(find.textContaining('Times: My time'), findsOneWidget);
+        await t.ensureVisible(find.text('NOW'));
+        await shot(t, 'schedule');
+        // switch to the channel's time zone
+        await t.tap(find.textContaining('Times: My time'));
+        await waitFor(t, find.text("Channel's time"));
+        await wait(t, 800); // let the sheet finish sliding up before tapping
+        await t.tap(find.text("Channel's time"));
+        await wait(t, 800);
+        expect(find.textContaining("Times: Channel's time (Manila)"), findsOneWidget);
+        await shot(t, 'schedule-channel-time');
+        scheduleZone = 'local';
+        navigatorKey.currentState!.maybePop();
+        await wait(t, 800);
+        playback.close();
+      }
+    }
 
     // ---- settings sheet
     await t.tap(find.byTooltip('Settings').hitTestable().first);

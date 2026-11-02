@@ -1,0 +1,25 @@
+# Schedule websites the daily job grabs, in priority order: a channel listed by several
+# sites is grabbed from the first one only. Names come from iptv-org's guides.json.
+# Start: the 20 sites covering the most channels reLiveTV can play, plus the only
+# Philippine one. Add or remove a line to change coverage.
+tapdmv.com
+i.mjh.nz
+pluto.tv
+tataplay.com
+epg.iptvx.one
+dishtv.in
+airtelxstream.in
+plex.tv
+tv.blue.ch
+sky.com
+mi.tv
+m.tv.sms.cz
+tvtv.us
+tv.mail.ru
+gatotv.com
+tvprofil.com
+tv.sfr.fr
+teleboy.ch
+programtv.onet.pl
+xumo.tv
+programetv.ro
