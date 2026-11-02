@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -40,7 +41,7 @@ class Playback extends ChangeNotifier {
 
   Failover? _failover;
   Timer? _watchdog, _retry;
-  Duration _lastPos = Duration.zero;
+  Duration _lastPos = Duration.zero, _lastBuf = Duration.zero;
   DateTime _lastProgress = DateTime.now();
   bool _started = false, _hadError = false, _listening = false, _suspended = false;
 
@@ -55,6 +56,9 @@ class Playback extends ChangeNotifier {
       // no youtube-dl/yt-dlp hand-off and no user scripts: nothing outside the stream runs
       native.setProperty('ytdl', 'no');
       native.setProperty('load-scripts', 'no');
+      // phones: "auto" quality picks the best variant up to ~2.5 Mbit/s (≈720p) instead of the
+      // highest — saves data and battery, and starts on slow connections. Quality menu still offers all.
+      if (Platform.isAndroid) native.setProperty('hls-bitrate', '2500000');
     }
     // mpv also reports non-fatal errors (a bad segment, a subtitle track): note it, let the watchdog decide
     player.stream.error.listen((_) => _hadError = true);
@@ -105,6 +109,7 @@ class Playback extends ChangeNotifier {
     _hadError = false;
     // baseline: the player may still report the previous stream's position for a moment
     _lastPos = player.state.position;
+    _lastBuf = Duration.zero;
     _lastProgress = DateTime.now();
     notifyListeners();
     player.open(Media(s.url, httpHeaders: s.headers));
@@ -136,7 +141,15 @@ class Playback extends ChangeNotifier {
       _lastProgress = DateTime.now(); // paused on purpose: not a stall
       return;
     }
-    final limit = Duration(seconds: _hadError ? 6 : 15);
+    // data still arriving (buffer growing) = slow, not dead
+    final buf = player.state.buffer;
+    if (buf > _lastBuf) {
+      _lastBuf = buf;
+      _lastProgress = DateTime.now();
+      return;
+    }
+    // first picture gets longer than a mid-play stall; an error with nothing arriving fails fast
+    final limit = Duration(seconds: _hadError ? 6 : (_started ? 15 : 30));
     if (DateTime.now().difference(_lastProgress) > limit) _failed();
   }
 
@@ -187,6 +200,28 @@ class Playback extends ChangeNotifier {
 }
 
 final playback = Playback();
+
+/// Counts open pop-ups (bottom sheets, dialogs, menus) so the mini player, which
+/// floats above every page, can step aside instead of covering them.
+class PopupObserver extends NavigatorObserver {
+  final open = ValueNotifier(0);
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PopupRoute) open.value++;
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PopupRoute) open.value--;
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (route is PopupRoute) open.value--;
+  }
+}
+
+final popupObserver = PopupObserver();
 
 /// Opens the watch page for [c], starting it unless it's already playing.
 /// [from] is the on-screen rect of what was tapped (a card); the page grows
@@ -416,7 +451,8 @@ class _PlayerPageState extends State<PlayerPage> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Video(key: _videoKey, controller: playback.video),
+            // pausing on leaving the app is ours to decide (Background play setting), not the widget's
+            Video(key: _videoKey, controller: playback.video, pauseUponEnteringBackgroundMode: false),
             StatusOverlay(c),
           ],
         ),
@@ -550,7 +586,7 @@ class StatusOverlay extends StatelessWidget {
 class PipVideo extends StatelessWidget {
   const PipVideo({super.key});
   @override
-  Widget build(BuildContext context) => Video(controller: playback.video, controls: NoVideoControls);
+  Widget build(BuildContext context) => Video(controller: playback.video, controls: NoVideoControls, pauseUponEnteringBackgroundMode: false);
 }
 
 /// Floating player shown above every screen while a channel is minimized.
@@ -564,10 +600,10 @@ class MiniPlayer extends StatelessWidget {
       top: r.top,
       width: r.width,
       child: ListenableBuilder(
-        listenable: playback,
+        listenable: Listenable.merge([playback, popupObserver.open]),
         builder: (context, _) {
           final c = playback.channel;
-          final show = playback.mini && c != null;
+          final show = playback.mini && c != null && popupObserver.open.value == 0;
           // a plain fade: the watch page itself shrinks into / grows out of this spot
           return AnimatedSwitcher(
             duration: motion(context, Durations.short4),
@@ -598,7 +634,7 @@ class _MiniCard extends StatelessWidget {
             onTap: () => openChannel(c),
             child: AspectRatio(
               aspectRatio: 16 / 9,
-              child: Video(controller: playback.video, controls: NoVideoControls),
+              child: Video(controller: playback.video, controls: NoVideoControls, pauseUponEnteringBackgroundMode: false),
             ),
           ),
           // fixed height so miniRect (the shrink animation's target) matches on every screen density

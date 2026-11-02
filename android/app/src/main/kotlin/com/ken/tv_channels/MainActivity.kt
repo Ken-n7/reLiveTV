@@ -5,6 +5,7 @@ import android.app.PictureInPictureParams
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
+import android.os.PowerManager
 import android.util.Rational
 import androidx.lifecycle.Lifecycle
 import io.flutter.embedding.android.FlutterActivity
@@ -61,7 +62,9 @@ class MainActivity : FlutterActivity() {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         channel?.invokeMethod("pipChanged", isInPictureInPictureMode)
         // The floating window was dismissed (not expanded back): stop like YouTube does.
-        if (!isInPictureInPictureMode && lifecycle.currentState == Lifecycle.State.CREATED) {
+        // Turning the screen off also ends picture-in-picture; that is not a dismissal.
+        val screenOn = (getSystemService(POWER_SERVICE) as PowerManager).isInteractive
+        if (!isInPictureInPictureMode && lifecycle.currentState == Lifecycle.State.CREATED && screenOn) {
             channel?.invokeMethod("pipClosed", null)
         }
     }
