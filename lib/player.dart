@@ -434,12 +434,43 @@ class _PlayerPageState extends State<PlayerPage> {
       return Row(
         children: [
           Expanded(child: Center(child: video)),
-          SizedBox(
-            width: panelWidth,
+          // one slim column: name + My List, then the schedule, no floating cards
+          Container(
+            width: (w * 0.36).clamp(260.0, 340.0),
+            color: const Color(0xFF141414),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _info(c, compact: true),
-                Expanded(child: panel),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 6, 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              c.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              channelSubtitle(c),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11, color: Colors.white60),
+                            ),
+                          ],
+                        ),
+                      ),
+                      MyListButton(c, compact: true),
+                    ],
+                  ),
+                ),
+                if (c.streams.length > 1) _sources(c, dense: true),
+                const Divider(height: 1, color: Colors.white12),
+                Expanded(child: SchedulePanel(c, compact: true)),
               ],
             ),
           ),
@@ -580,6 +611,26 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
+  /// A row of source chips (shown when a channel has several streams).
+  Widget _sources(Channel c, {bool dense = false}) => SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
+    padding: dense ? const EdgeInsets.fromLTRB(12, 0, 12, 6) : EdgeInsets.zero,
+    child: Row(
+      children: [
+        for (var i = 0; i < c.streams.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              visualDensity: dense ? VisualDensity.compact : null,
+              label: Text(['Source ${i + 1}', ?c.streams[i].quality, ...c.streams[i].labels].join(' · '), style: dense ? const TextStyle(fontSize: 11) : null),
+              selected: playback.streamIndex == i,
+              onSelected: (_) => playback.playSource(i),
+            ),
+          ),
+      ],
+    ),
+  );
+
   /// Name, country/categories, logo + My List, and source chips. [compact] for the
   /// narrow side panel on phones held sideways.
   Widget _info(Channel c, {bool compact = false}) {
@@ -630,25 +681,7 @@ class _PlayerPageState extends State<PlayerPage> {
               MyListButton(c),
             ],
           ),
-          if (c.streams.length > 1) ...[
-            const SizedBox(height: 10),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (var i = 0; i < c.streams.length; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(['Source ${i + 1}', ?c.streams[i].quality, ...c.streams[i].labels].join(' · ')),
-                        selected: playback.streamIndex == i,
-                        onSelected: (_) => playback.playSource(i),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
+          if (c.streams.length > 1) ...[const SizedBox(height: 10), _sources(c)],
         ],
       ),
     );

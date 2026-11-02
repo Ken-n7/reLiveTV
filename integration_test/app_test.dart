@@ -334,6 +334,11 @@ void main() {
         // phone held sideways: info moves into the side panel
         await resize(t, const Size(780, 360));
         expect(nameRect().left, greaterThanOrEqualTo(videoRect().right - 1), reason: 'info in the side panel');
+        scheduleZone = 'channel'; // longest button label: "Times: Channel's time (Manila)"
+        t.state(find.byType(SchedulePanel)).setState(() {}); // ignore: invalid_use_of_protected_member
+        await wait(t, 500);
+        expect(t.getSize(find.text('Schedule')).height, lessThan(30), reason: 'title stays on one line in a narrow panel');
+        scheduleZone = 'local';
         await shot(t, 'watch-landscape-phone');
 
         // portrait: video pinned while the schedule scrolls

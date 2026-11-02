@@ -14,7 +14,8 @@ import 'schedule.dart';
 class SchedulePanel extends StatefulWidget {
   final Channel c;
   final bool embedded;
-  const SchedulePanel(this.c, {super.key, this.embedded = false});
+  final bool compact; // phone held sideways: no card, smaller type, icon-only time-zone button
+  const SchedulePanel(this.c, {super.key, this.embedded = false, this.compact = false});
   @override
   State<SchedulePanel> createState() => _SchedulePanelState();
 }
@@ -76,26 +77,38 @@ class _SchedulePanelState extends State<SchedulePanel> {
         final channelOff = widget.c.timezone == null ? null : _offsets[widget.c.timezone];
         final deviceOff = DateTime.now().timeZoneOffset.inMinutes;
 
+        Future<void> pickZone() async {
+          final pick = await showModalBottomSheet<String>(
+            context: context,
+            isScrollControlled: true,
+            showDragHandle: true,
+            builder: (_) => _ZoneSheet(channelZone: widget.c.timezone, offsets: _offsets),
+          );
+          if (pick != null) setState(() => scheduleZone = pick);
+        }
+
+        final compact = widget.compact;
         final header = Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+          padding: compact ? const EdgeInsets.fromLTRB(12, 4, 4, 0) : const EdgeInsets.fromLTRB(16, 12, 8, 4),
           child: Row(
             children: [
-              const Expanded(
-                child: Text('Schedule', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+              // the title keeps its width; on narrow panels the time-zone button shortens instead
+              Text(
+                'Schedule',
+                style: TextStyle(fontSize: compact ? 14 : 17, fontWeight: FontWeight.bold),
               ),
-              if (upcoming.isNotEmpty)
-                TextButton.icon(
-                  icon: const Icon(Icons.schedule, size: 16),
-                  label: Text('Times: $label', overflow: TextOverflow.ellipsis),
-                  onPressed: () async {
-                    final pick = await showModalBottomSheet<String>(
-                      context: context,
-                      isScrollControlled: true,
-                      showDragHandle: true,
-                      builder: (_) => _ZoneSheet(channelZone: widget.c.timezone, offsets: _offsets),
-                    );
-                    if (pick != null) setState(() => scheduleZone = pick);
-                  },
+              const SizedBox(width: 8),
+              const Spacer(),
+              if (upcoming.isNotEmpty && compact)
+                IconButton(visualDensity: VisualDensity.compact, iconSize: 18, tooltip: 'Times: $label', icon: const Icon(Icons.schedule), onPressed: pickZone)
+              else if (upcoming.isNotEmpty)
+                Flexible(
+                  flex: 100,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.schedule, size: 16),
+                    label: Text('Times: $label', overflow: TextOverflow.ellipsis),
+                    onPressed: pickZone,
+                  ),
                 ),
             ],
           ),
@@ -133,7 +146,9 @@ class _SchedulePanelState extends State<SchedulePanel> {
               lastDay = day;
               rows.add(_DayHeader(day));
             }
-            rows.add(_ProgrammeRow(p, live: !p.start.isAfter(now), start: _time(context, p.start, off), stop: _time(context, p.stop, off), now: now));
+            rows.add(
+              _ProgrammeRow(compact: compact, p, live: !p.start.isAfter(now), start: _time(context, p.start, off), stop: _time(context, p.stop, off), now: now),
+            );
           }
           body = widget.embedded
               ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows)
@@ -145,8 +160,8 @@ class _SchedulePanelState extends State<SchedulePanel> {
         // in the side panel everything below the header scrolls, so a short panel never overflows
         final content = widget.embedded || body is Expanded ? body : Expanded(child: SingleChildScrollView(child: body));
         return Container(
-          decoration: BoxDecoration(color: const Color(0xFF181818), borderRadius: BorderRadius.circular(12)),
-          clipBehavior: Clip.antiAlias,
+          decoration: compact ? null : BoxDecoration(color: const Color(0xFF181818), borderRadius: BorderRadius.circular(12)),
+          clipBehavior: compact ? Clip.none : Clip.antiAlias, // nothing to clip without the card
           child: Column(
             mainAxisSize: widget.embedded ? MainAxisSize.min : MainAxisSize.max,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -194,6 +209,7 @@ class _DayHeader extends StatelessWidget {
 
 String _duration(Duration d) {
   final h = d.inHours, m = d.inMinutes % 60;
+  if (h == 0 && m == 0) return '<1m'; // promos and idents
   return h == 0 ? '${m}m' : (m == 0 ? '${h}h' : '${h}h ${m}m');
 }
 
@@ -204,23 +220,33 @@ class _ProgrammeRow extends StatelessWidget {
   final bool live;
   final String start, stop;
   final DateTime now;
-  const _ProgrammeRow(this.p, {required this.live, required this.start, required this.stop, required this.now});
+  final bool compact;
+  const _ProgrammeRow(this.p, {required this.live, required this.start, required this.stop, required this.now, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
     final length = p.stop.difference(p.start);
+    final k = compact ? 0.88 : 1.0; // smaller type on a phone held sideways
     if (!live) {
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16, vertical: compact ? 5 : 7),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SizedBox(
-              width: 72,
-              child: Text(start, style: const TextStyle(fontSize: 13, color: Colors.white70)),
+              width: compact ? 62 : 72,
+              child: Text(
+                start,
+                style: TextStyle(fontSize: 13 * k, color: Colors.white70),
+              ),
             ),
             Expanded(
-              child: Text(p.title, style: const TextStyle(fontSize: 14), maxLines: 2, overflow: TextOverflow.ellipsis),
+              child: Text(
+                p.title,
+                style: TextStyle(fontSize: 14 * k),
+                maxLines: compact ? 1 : 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             const SizedBox(width: 8),
             Text(_duration(length), style: const TextStyle(fontSize: 12, color: Colors.white38)),
@@ -230,8 +256,8 @@ class _ProgrammeRow extends StatelessWidget {
     }
     final left = p.stop.difference(now);
     return Container(
-      margin: const EdgeInsets.fromLTRB(8, 2, 8, 6),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      margin: compact ? const EdgeInsets.fromLTRB(6, 2, 6, 4) : const EdgeInsets.fromLTRB(8, 2, 8, 6),
+      padding: compact ? const EdgeInsets.fromLTRB(10, 8, 10, 9) : const EdgeInsets.fromLTRB(12, 10, 12, 12),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
@@ -258,7 +284,12 @@ class _ProgrammeRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          Text(p.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          Text(
+            p.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 16 * k, fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(2),
