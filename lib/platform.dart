@@ -27,9 +27,11 @@ void initPlatform() {
 }
 
 void _onHide() {
-  if (playback.channel == null || inPip.value) return;
+  if (playback.channel == null) return;
   final playing = playback.player.state.playing;
   if (backgroundPlay.value) {
+    // also when picture-in-picture is showing: screen-off stops the activity, and without the
+    // foreground service Android (and phone makers' battery savers) freeze or stop playback
     if (Platform.isAndroid && playing) platform.invokeMethod('startPlaybackService', {'title': playback.channel!.name, 'playing': true});
     return;
   }

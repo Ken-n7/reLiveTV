@@ -96,6 +96,7 @@ Future<void> main() async {
       }),
     ),
     navigatorKey: navigatorKey,
+    navigatorObservers: [popupObserver],
     builder: (context, child) => ValueListenableBuilder(
       valueListenable: inPip,
       // picture-in-picture: only the video; the app stays alive underneath (Offstage keeps state)
