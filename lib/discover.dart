@@ -120,19 +120,27 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
 
   Widget _searchBar() => Padding(
     padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-    child: TextField(
-      controller: _search,
-      focusNode: _searchFocus,
-      textInputAction: TextInputAction.search,
-      onChanged: (_) => _update(() {}),
-      decoration: InputDecoration(
-        hintText: 'Search channels, networks, countries, languages',
-        prefixIcon: const Icon(Icons.search),
-        suffixIcon: _search.text.isEmpty ? null : IconButton(tooltip: 'Clear search', icon: const Icon(Icons.close), onPressed: () => _update(_search.clear)),
-        filled: true,
-        fillColor: const Color(0xFF232323),
-        isDense: true,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+    // one-line field: up/down leave it instead of moving the cursor, so a TV remote
+    // (or keyboard) can't get stuck in search; left/right still move the cursor
+    child: Shortcuts(
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.arrowDown): DirectionalFocusIntent(TraversalDirection.down, ignoreTextFields: false),
+        SingleActivator(LogicalKeyboardKey.arrowUp): DirectionalFocusIntent(TraversalDirection.up, ignoreTextFields: false),
+      },
+      child: TextField(
+        controller: _search,
+        focusNode: _searchFocus,
+        textInputAction: TextInputAction.search,
+        onChanged: (_) => _update(() {}),
+        decoration: InputDecoration(
+          hintText: 'Search channels, networks, countries, languages',
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: _search.text.isEmpty ? null : IconButton(tooltip: 'Clear search', icon: const Icon(Icons.close), onPressed: () => _update(_search.clear)),
+          filled: true,
+          fillColor: const Color(0xFF232323),
+          isDense: true,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+        ),
       ),
     ),
   );
