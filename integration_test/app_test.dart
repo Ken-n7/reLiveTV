@@ -11,12 +11,14 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart' show timeDilation;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:tv_channels/catalog.dart';
 import 'package:tv_channels/discover.dart';
 import 'package:tv_channels/failover.dart';
 import 'package:tv_channels/main.dart' as app;
 import 'package:tv_channels/player.dart';
 import 'package:tv_channels/schedule.dart';
+import 'package:tv_channels/schedule_view.dart';
 import 'package:tv_channels/settings.dart';
 
 Future<void> waitFor(WidgetTester t, Finder f, {int seconds = 90}) async {
@@ -294,27 +296,70 @@ void main() {
     sem.dispose();
     FocusManager.instance.primaryFocus?.unfocus();
 
-    // ---- TV schedule card (served by the test runner: SCHEDULE_BASE points at a local server)
+    // ---- watch page layouts + schedule panel (schedule served by a local test server)
     if (const String.fromEnvironment('SCHEDULE_BASE').isNotEmpty) {
-      final smni = app.store.catalog.value!.channels.where((c) => c.id == 'SMNI.ph').firstOrNull;
+      final cat = app.store.catalog.value!;
+      final smni = cat.channels.where((c) => c.id == 'SMNI.ph').firstOrNull;
       if (smni != null) {
+        theater.value = false;
+        scheduleZone = 'local'; // a previous run may have left another choice saved
+        await resize(t, const Size(1300, 760));
         openChannel(smni);
-        await waitFor(t, find.text('NOW'), seconds: 20);
-        expect(find.text('Test show now'), findsOneWidget);
-        expect(find.textContaining('NEXT'), findsOneWidget);
+        await waitFor(t, find.text('Test show now'), seconds: 20);
+        expect(find.textContaining('LIVE'), findsWidgets);
+        expect(find.text('Test show next'), findsOneWidget);
         expect(find.textContaining('Times: My time'), findsOneWidget);
-        await t.ensureVisible(find.text('NOW'));
-        await shot(t, 'schedule');
-        // switch to the channel's time zone
+        final screen = t.view.physicalSize;
+        Rect videoRect() => t.getRect(find.descendant(of: find.byType(PlayerPage), matching: find.byType(Video)).first);
+        Rect nameRect() => t.getRect(find.descendant(of: find.byType(PlayerPage), matching: find.text('SMNI')).first);
+        final panel = find.byType(SchedulePanel);
+        // side by side: info fits under the video, schedule panel to the right
+        expect(nameRect().bottom, lessThanOrEqualTo(screen.height), reason: 'info fits, no scrolling');
+        expect(t.getRect(panel).left, greaterThanOrEqualTo(videoRect().right - 1), reason: 'schedule on the right');
+        final normalWidth = videoRect().width;
+        await shot(t, 'watch-wide');
+
+        // theater (T key on the focused player): video full width, info + schedule below, still fits
+        await t.tap(find.descendant(of: find.byType(PlayerPage), matching: find.byType(Video)).first);
+        await wait(t, 300);
+        await t.sendKeyEvent(LogicalKeyboardKey.keyT);
+        await wait(t, 1000);
+        expect(theater.value, isTrue, reason: 'T toggles theater mode');
+        expect(videoRect().width, greaterThan(normalWidth * 1.1), reason: 'theater video is clearly bigger');
+        expect(nameRect().bottom, lessThanOrEqualTo(screen.height));
+        expect(t.getRect(panel).top, greaterThanOrEqualTo(videoRect().bottom - 1), reason: 'schedule below the video');
+        await shot(t, 'watch-theater');
+        theater.value = false;
+
+        // phone held sideways: info moves into the side panel
+        await resize(t, const Size(780, 360));
+        expect(nameRect().left, greaterThanOrEqualTo(videoRect().right - 1), reason: 'info in the side panel');
+        await shot(t, 'watch-landscape-phone');
+
+        // portrait: video pinned while the schedule scrolls
+        await resize(t, const Size(400, 760));
+        final before = videoRect();
+        await t.drag(find.descendant(of: find.byType(PlayerPage), matching: find.byType(ListView)).first, const Offset(0, -300));
+        await wait(t, 500);
+        expect(videoRect(), before, reason: 'video stays put');
+        await shot(t, 'watch-portrait');
+        await resize(t, const Size(1300, 760));
+
+        // time zone switch
         await t.tap(find.textContaining('Times: My time'));
         await waitFor(t, find.text("Channel's time"));
         await wait(t, 800); // let the sheet finish sliding up before tapping
         await t.tap(find.text("Channel's time"));
         await wait(t, 800);
         expect(find.textContaining("Times: Channel's time (Manila)"), findsOneWidget);
-        await shot(t, 'schedule-channel-time');
         scheduleZone = 'local';
-        navigatorKey.currentState!.maybePop();
+
+        // a channel with no schedule says so
+        final other = cat.channels.firstWhere((c) => c.id != null && c.id != 'SMNI.ph' && c.streams.isNotEmpty);
+        openChannel(other);
+        await waitFor(t, find.text('No schedule available'), seconds: 20);
+        await shot(t, 'watch-no-schedule');
+        navigatorKey.currentState!.popUntil((r) => r.isFirst); // two watch pages were opened
         await wait(t, 800);
         playback.close();
       }
