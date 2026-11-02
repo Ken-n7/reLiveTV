@@ -1,9 +1,7 @@
-import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -95,16 +93,15 @@ Future<void> main() async {
 }
 
 Future<Catalog> loadCatalog() async {
-  final bodies = await Future.wait(apiFiles.map((f) async {
+  final bodies = Map.fromEntries(await Future.wait(apiFiles.map((f) async {
     final r = await http.get(Uri.parse('$apiBase/$f.json'));
     if (r.statusCode != 200) throw Exception('$f.json: HTTP ${r.statusCode}');
     return MapEntry(f, r.body);
-  }));
-  // live-stream list from tool/check_streams.py, bundled at build time
-  final alive = jsonDecode(await rootBundle.loadString('assets/alive.json'))['urls'] as List;
-  // ponytail: refetches ~15 MB every launch; cache to disk if startup gets slow
-  return compute(buildCatalog, {...Map.fromEntries(bodies), 'alive': jsonEncode(alive)});
+  })));
+  return compute(_build, bodies);
 }
+
+Catalog _build(Map<String, String> bodies) => buildCatalog((name) => bodies[name]!);
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
