@@ -61,11 +61,15 @@ class MainActivity : FlutterActivity() {
                         result.success("needsPermission")
                     } else {
                         val uri = FileProvider.getUriForFile(this, "$packageName.updates", File(call.arguments as String))
-                        startActivity(
-                            Intent(Intent.ACTION_VIEW)
-                                .setDataAndType(uri, "application/vnd.android.package-archive")
-                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-                        )
+                        val intent = Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(uri, "application/vnd.android.package-archive")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                        // go straight to Android's own installer; other apps that open APKs
+                        // (stores, file managers) would otherwise show an "open with" chooser
+                        packageManager.queryIntentActivities(intent, 0)
+                            .firstOrNull { it.activityInfo.packageName.endsWith("packageinstaller") }
+                            ?.let { intent.setPackage(it.activityInfo.packageName) }
+                        startActivity(intent)
                         result.success("started")
                     }
                 }

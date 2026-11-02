@@ -98,10 +98,11 @@ class Updates {
 
   /// Android: download, verify the checksum, hand to the system installer.
   /// Linux: open the release page (manual download).
-  Future<void> install(Release r) async {
+  /// Returns 'needsPermission' when Android first has to allow installs.
+  Future<String?> install(Release r) async {
     if (!Platform.isAndroid) {
       await Process.run('xdg-open', [r.pageUrl]);
-      return;
+      return null;
     }
     final abis = (await platform.invokeListMethod<String>('abis')) ?? const [];
     final name = apkFor(r, abis);
@@ -110,9 +111,13 @@ class Updates {
     if (expected == null) throw const HttpException('release has no checksum for this file');
 
     final dir = Directory('${(await cacheRoot()).path}/update');
+    final file = File('${dir.path}/$name');
+    // already downloaded and verified (e.g. before Android asked to allow installs)
+    if (file.existsSync() && await platform.invokeMethod<String>('sha256', file.path) == expected) {
+      return platform.invokeMethod<String>('installApk', file.path);
+    }
     if (dir.existsSync()) dir.deleteSync(recursive: true);
     dir.createSync(recursive: true);
-    final file = File('${dir.path}/$name');
     final client = http.Client();
     try {
       final res = await client.send(http.Request('GET', Uri.parse(r.assets[name]!)));
@@ -140,7 +145,7 @@ class Updates {
       file.deleteSync();
       throw const HttpException('download failed verification; not installed');
     }
-    await platform.invokeMethod('installApk', file.path);
+    return platform.invokeMethod<String>('installApk', file.path);
   }
 }
 
