@@ -12,6 +12,7 @@ import 'motion.dart';
 import 'platform.dart';
 import 'player.dart';
 import 'settings.dart';
+import 'update.dart';
 
 const appName = 'reLiveTV';
 
@@ -87,6 +88,8 @@ Future<void> main() async {
   store.catalog.addListener(_followRenames);
   unawaited(store.start());
   initPlatform();
+  // quiet daily check for a newer release (never blocks or nags; failures are ignored)
+  unawaited(updates.check(appVersion).then((_) {}, onError: (_) {}));
   runApp(
     MaterialApp(
       title: appName,
@@ -241,6 +244,12 @@ class _AppShellState extends State<AppShell> {
       ],
     );
     final indicator = Colors.white.withValues(alpha: 0.2);
+    final content = Column(
+      children: [
+        Expanded(child: body),
+        const UpdateBanner(),
+      ],
+    );
     if (rail) {
       return Scaffold(
         body: Row(
@@ -257,13 +266,13 @@ class _AppShellState extends State<AppShell> {
                 NavigationRailDestination(icon: Icon(Icons.explore_outlined), selectedIcon: Icon(Icons.explore), label: Text('Discover')),
               ],
             ),
-            Expanded(child: body),
+            Expanded(child: content),
           ],
         ),
       );
     }
     return Scaffold(
-      body: body,
+      body: content,
       bottomNavigationBar: NavigationBar(
         backgroundColor: Colors.black,
         indicatorColor: indicator,
@@ -546,6 +555,21 @@ class SettingsSheet extends StatelessWidget {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.system_update_outlined),
+              title: const Text('Check for updates'),
+              subtitle: const Text('Version $appVersion'),
+              onTap: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                Navigator.pop(context);
+                try {
+                  final r = await updates.check(appVersion, force: true);
+                  messenger.showSnackBar(SnackBar(content: Text(r == null ? "You're on the latest version." : 'reLiveTV ${r.version} is available.')));
+                } catch (_) {
+                  messenger.showSnackBar(const SnackBar(content: Text("Couldn't check for updates. Check your connection.")));
+                }
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.info_outline),
               title: const Text('About reLiveTV'),
               subtitle: const Text('Version $appVersion'),
@@ -565,6 +589,60 @@ class SettingsSheet extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// "reLiveTV 1.2.0 is available" — shown above the navigation until dismissed.
+class UpdateBanner extends StatelessWidget {
+  const UpdateBanner({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder(
+      valueListenable: updates.available,
+      builder: (context, r, _) {
+        if (r == null) return const SizedBox.shrink();
+        return Material(
+          color: const Color(0xFF232323),
+          child: SafeArea(
+            top: false,
+            child: ValueListenableBuilder(
+              valueListenable: updates.progress,
+              builder: (context, progress, _) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (progress != null) LinearProgressIndicator(value: progress, minHeight: 2, color: Colors.white, backgroundColor: Colors.white12),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.system_update_outlined, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(child: Text(progress == null ? 'reLiveTV ${r.version} is available' : 'Downloading ${(progress * 100).round()}%')),
+                        if (progress == null) ...[
+                          TextButton(onPressed: () => updates.available.value = null, child: const Text('Later')),
+                          FilledButton(
+                            style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+                            onPressed: () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              try {
+                                await updates.install(r);
+                              } catch (e) {
+                                messenger.showSnackBar(SnackBar(content: Text("Update didn't install: $e")));
+                              }
+                            },
+                            child: const Text('Update'),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

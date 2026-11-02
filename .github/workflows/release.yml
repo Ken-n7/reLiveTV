@@ -1,0 +1,76 @@
+name: release
+
+# Push a version tag (git tag v1.2.0 && git push origin v1.2.0) to publish a release.
+# Pushes to main build nothing.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write # create the GitHub Release and upload its files; nothing else
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "tag must look like v1.2.3"; exit 1; }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: 3.38.7
+          cache: true
+
+      - name: Tests
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      - name: Android (signed, one APK per CPU type)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=relivetv\nkeyPassword=%s\n' \
+            "$RUNNER_TEMP/release.jks" "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" > android/key.properties
+          flutter build apk --release --split-per-abi \
+            --build-name "$VERSION" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$VERSION"
+          rm android/key.properties "$RUNNER_TEMP/release.jks"
+          mkdir -p dist
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            cp "build/app/outputs/flutter-apk/app-$abi-release.apk" "dist/relivetv-$VERSION-android-$abi.apk"
+          done
+
+      - name: Linux (x64)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev
+          flutter build linux --release --build-name "$VERSION" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$VERSION"
+          tar -czf "dist/relivetv-$VERSION-linux-x64.tar.gz" -C build/linux/x64/release/bundle .
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "reLiveTV $VERSION" --generate-notes --verify-tag
