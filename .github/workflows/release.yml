@@ -64,6 +64,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y -q clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev
           flutter build linux --release --build-name "$VERSION" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$VERSION"
+          cp linux/relivetv.png build/linux/x64/release/bundle/relivetv.png
           tar -czf "dist/relivetv-$VERSION-linux-x64.tar.gz" -C build/linux/x64/release/bundle .
 
       - name: Checksums
