@@ -29,6 +29,30 @@ def test_build():
     assert 'site="first.com"' in lines[0] and 'xmltv_id="A.ph"' in lines[0] and "A &amp; Co" in lines[0]
 
 
+def test_language_first():
+    guides = [
+        {"channel": "CN.us", "site": "ru-site.com", "site_id": "1", "lang": "ru"},
+        {"channel": "CN.us", "site": "mx-site.com", "site_id": "6", "lang": "es"},  # higher priority, but not the main language
+        {"channel": "CN.us", "site": "us-site.com", "site_id": "2", "lang": "en"},
+        {"channel": "Canal.mx", "site": "ru-site.com", "site_id": "3", "lang": "ru"},
+        {"channel": "Canal.mx", "site": "us-site.com", "site_id": "4", "lang": "en"},
+        {"channel": "Canal.mx", "site": "mx-site.com", "site_id": "5", "lang": "es"},
+    ]
+    feeds = [
+        {"channel": "CN.us", "is_main": False, "languages": ["spa"]},  # Spanish audio feed
+        {"channel": "CN.us", "is_main": True, "languages": ["eng", "spa"]},
+        {"channel": "Canal.mx", "is_main": True, "languages": ["spa"]},
+    ]
+    streams = [{"channel": c, "url": "https://x/" + c} for c in ("CN.us", "Canal.mx")]
+    # ru-site.com has the highest priority, but language wins
+    lines = build(["ru-site.com", "mx-site.com", "us-site.com"], streams, [], [], guides, feeds)
+    assert 'site="us-site.com"' in lines[0] and 'xmltv_id="CN.us"' in lines[0], lines  # English channel → English listings
+    assert 'xmltv_id="Canal.mx"' in lines[1] and 'site="mx-site.com"' in lines[1], lines  # Spanish channel → Spanish listings
+    # without language info, English beats other languages
+    lines = build(["ru-site.com", "us-site.com"], streams[:1], [], [], [guides[0], guides[2]], [])
+    assert 'site="us-site.com"' in lines[0], lines
+
+
 def test_split():
     now = parse_time("20261102100000 +0000")
     assert parse_time("20261102180000 +0800") == now, "offsets become UTC"
@@ -55,5 +79,6 @@ def test_split():
 
 if __name__ == "__main__":
     test_build()
+    test_language_first()
     test_split()
     print("ok")

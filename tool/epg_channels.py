@@ -16,8 +16,24 @@ def get(name):
         return json.load(r)
 
 
-def build(sites, streams, channels, blocklist, guides):
-    """Pure: returns <channel> lines, one site per channel (first site in `sites` wins)."""
+# feeds.json uses ISO 639-3 ("eng"), guides.json uses ISO 639-1 ("en")
+ISO3_TO_1 = {
+    "eng": "en", "spa": "es", "fra": "fr", "por": "pt", "deu": "de", "ita": "it", "rus": "ru", "ara": "ar",
+    "zho": "zh", "cmn": "zh", "yue": "zh", "hin": "hi", "tur": "tr", "pol": "pl", "nld": "nl", "ron": "ro",
+    "ces": "cs", "slk": "sk", "ell": "el", "hun": "hu", "swe": "sv", "dan": "da", "nor": "no", "nob": "no",
+    "fin": "fi", "hrv": "hr", "srp": "sr", "bos": "bs", "slv": "sl", "bul": "bg", "ukr": "uk", "bel": "be",
+    "sqi": "sq", "mkd": "mk", "lit": "lt", "lav": "lv", "est": "et", "kor": "ko", "jpn": "ja", "ind": "id",
+    "msa": "ms", "zsm": "ms", "tha": "th", "vie": "vi", "fil": "tl", "tgl": "tl", "heb": "he", "fas": "fa",
+    "pes": "fa", "urd": "ur", "ben": "bn", "tam": "ta", "tel": "te", "mar": "mr", "guj": "gu", "kan": "kn",
+    "mal": "ml", "pan": "pa", "cat": "ca", "glg": "gl", "eus": "eu", "isl": "is", "gle": "ga", "kat": "ka",
+    "hye": "hy", "aze": "az", "kaz": "kk", "uzb": "uz", "mon": "mn", "swa": "sw", "afr": "af", "amh": "am",
+}
+
+
+def build(sites, streams, channels, blocklist, guides, feeds=()):
+    """Pure: returns <channel> lines, one guide source per channel. Picks a source in the
+    channel's own language first, then English, then anything; ties go to the first site
+    in `sites` (a US channel listed by a Russian site must not get Russian listings)."""
     hidden = {b.get("channel") for b in blocklist}
     hidden |= {c["id"] for c in channels if c.get("closed") or c.get("is_nsfw")}
     playable = {
@@ -25,12 +41,31 @@ def build(sites, streams, channels, blocklist, guides):
         if s.get("channel") and str(s.get("url", "")).startswith(("http://", "https://"))
     } - hidden
     rank = {s: i for i, s in enumerate(sites)}
+    main_lang, spoken = {}, {}  # channel -> main language / all its languages, as ISO 639-1
+    for f in sorted(feeds, key=lambda f: not f.get("is_main")):  # main feed first
+        langs = [ISO3_TO_1[c] for c in f.get("languages") or () if c in ISO3_TO_1]
+        if langs:
+            main_lang.setdefault(f.get("channel"), langs[0])
+            spoken.setdefault(f.get("channel"), set()).update(langs)
+
+    def score(e):
+        lang, ch = e.get("lang"), e["channel"]
+        if lang == main_lang.get(ch):
+            fit = 0  # the channel's main language
+        elif lang in spoken.get(ch, ()):
+            fit = 1  # another language it broadcasts in (e.g. a second audio track)
+        elif lang == "en":
+            fit = 2
+        else:
+            fit = 3
+        return (fit, rank[e["site"]])
+
     best = {}  # channel -> guide entry
     for e in guides:
         ch, site = e.get("channel"), e.get("site")
         if ch not in playable or site not in rank or not e.get("site_id"):
             continue
-        if ch not in best or rank[site] < rank[best[ch]["site"]]:
+        if ch not in best or score(e) < score(best[ch]):
             best[ch] = e
     lines = []
     for ch, e in sorted(best.items()):
@@ -44,7 +79,7 @@ def build(sites, streams, channels, blocklist, guides):
 
 def main(sites_file, out):
     sites = [l.strip() for l in open(sites_file) if l.strip() and not l.lstrip().startswith("#")]
-    lines = build(sites, get("streams"), get("channels"), get("blocklist"), get("guides"))
+    lines = build(sites, get("streams"), get("channels"), get("blocklist"), get("guides"), get("feeds"))
     with open(out, "w", encoding="utf-8") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n<channels>\n' + "\n".join(lines) + "\n</channels>\n")
     print(f"{len(lines)} channels from {len(sites)} sites")
