@@ -7,10 +7,15 @@ late final SharedPreferences prefs;
 /// Keep playing (audio, picture-in-picture on Android) after leaving the app. Off by default.
 final backgroundPlay = ValueNotifier(false);
 
+/// Watch page in theater mode (video full width) on wide screens. Remembered, like YouTube.
+final theater = ValueNotifier(false);
+
 Future<void> initSettings() async {
   prefs = await SharedPreferences.getInstance();
   backgroundPlay.value = prefs.getBool('backgroundPlay') ?? false;
   backgroundPlay.addListener(() => prefs.setBool('backgroundPlay', backgroundPlay.value));
+  theater.value = prefs.getBool('theater') ?? false;
+  theater.addListener(() => prefs.setBool('theater', theater.value));
 }
 
 /// Stream URLs that failed every attempt on this device, with when. Used only to

@@ -368,25 +368,11 @@ class _PlayerPageState extends State<PlayerPage> {
         backgroundColor: Colors.black,
         body: SafeArea(
           child: ListenableBuilder(
-            listenable: playback,
+            listenable: Listenable.merge([playback, theater]),
             builder: (context, _) {
               final c = playback.channel;
               if (c == null) return const SizedBox.shrink();
-              final maxVideoHeight = MediaQuery.sizeOf(context).height * 0.7;
-              return ListView(
-                children: [
-                  // full width on phones; on wide screens capped at 70% height (theater mode)
-                  Center(
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(maxHeight: maxVideoHeight),
-                      child: AspectRatio(aspectRatio: 16 / 9, child: _video(context, c)),
-                    ),
-                  ),
-                  Center(
-                    child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 1100), child: _details(c)),
-                  ),
-                ],
-              );
+              return LayoutBuilder(builder: (context, box) => _layout(context, c, box.maxWidth, box.maxHeight));
             },
           ),
         ),
@@ -394,7 +380,122 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  Widget _video(BuildContext context, Channel c) {
+  /// Wide (laptop, tablet, phone sideways): video + info on the left, schedule panel on the
+  /// right; the left side always fits and never scrolls. Theater: video full width on top.
+  /// Portrait: video pinned on top, info + schedule scroll underneath.
+  Widget _layout(BuildContext context, Channel c, double w, double h) {
+    final wide = w >= 600 && w > h;
+    final tall = h >= 520; // room for info under the video (not a phone held sideways)
+    final canTheater = wide && tall;
+    final video = AspectRatio(
+      aspectRatio: 16 / 9,
+      child: _video(context, c, canTheater: canTheater),
+    );
+    if (!wide) {
+      return Column(
+        children: [
+          video,
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.only(bottom: 24),
+              children: [
+                _info(c),
+                Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: SchedulePanel(c, embedded: true)),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+    final panelWidth = (w * 0.3).clamp(300.0, 420.0);
+    final panel = Padding(padding: const EdgeInsets.fromLTRB(0, 12, 12, 12), child: SchedulePanel(c));
+    if (canTheater && theater.value) {
+      final videoHeight = min(w * 9 / 16, h - 170); // leave room for compact info + a few schedule rows
+      return Column(
+        children: [
+          SizedBox(
+            height: videoHeight,
+            child: Center(child: video),
+          ),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: SingleChildScrollView(child: _info(c, compact: true))), // scrolls only if the window is tiny
+                SizedBox(width: panelWidth, child: panel),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+    if (!tall) {
+      // phone held sideways: video uses the full height; info moves into the side panel
+      return Row(
+        children: [
+          Expanded(child: Center(child: video)),
+          // one slim column: name + My List, then the schedule, no floating cards
+          Container(
+            width: (w * 0.36).clamp(260.0, 340.0),
+            color: const Color(0xFF141414),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 6, 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              c.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              channelSubtitle(c),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11, color: Colors.white60),
+                            ),
+                          ],
+                        ),
+                      ),
+                      MyListButton(c, compact: true),
+                    ],
+                  ),
+                ),
+                if (c.streams.length > 1) _sources(c, dense: true),
+                const Divider(height: 1, color: Colors.white12),
+                Expanded(child: SchedulePanel(c, compact: true)),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          // info sits right under the video; the video shrinks only if the window is too short
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(child: video), // 16:9 box sizes itself: full width, or less if too tall
+              _info(c),
+            ],
+          ),
+        ),
+        SizedBox(width: panelWidth, child: panel),
+      ],
+    );
+  }
+
+  Widget _video(BuildContext context, Channel c, {required bool canTheater}) {
     final chevron = MaterialCustomButton(
       icon: const Icon(Icons.keyboard_arrow_down, semanticLabel: 'Minimize'),
       onPressed: () => minimize(context),
@@ -414,9 +515,18 @@ class _PlayerPageState extends State<PlayerPage> {
       automaticallyImplySkipPreviousButton: false,
       topButtonBar: [chevron, const Spacer(), gear],
       primaryButtonBar: const [Spacer(), MaterialPlayOrPauseButton(iconSize: 56), Spacer()],
-      bottomButtonBar: const [LiveBadge(), Spacer(), MaterialFullscreenButton()],
+      bottomButtonBar: [
+        const LiveBadge(),
+        const Spacer(),
+        if (canTheater) // tablets held sideways
+          MaterialCustomButton(
+            icon: Icon(theater.value ? Icons.width_normal_outlined : Icons.width_wide_outlined, semanticLabel: 'Theater mode'),
+            onPressed: () => theater.value = !theater.value,
+          ),
+        const MaterialFullscreenButton(),
+      ],
     );
-    final mobileFull = mobile.copyWith(topButtonBar: [const Spacer(), gear]);
+    final mobileFull = mobile.copyWith(topButtonBar: [const Spacer(), gear], bottomButtonBar: const [LiveBadge(), Spacer(), MaterialFullscreenButton()]);
 
     final desktop = MaterialDesktopVideoControlsThemeData(
       displaySeekBar: false,
@@ -441,6 +551,11 @@ class _PlayerPageState extends State<PlayerPage> {
           icon: const Icon(Icons.picture_in_picture_alt_outlined, semanticLabel: 'Mini player'),
           onPressed: () => minimize(context),
         ),
+        if (canTheater)
+          MaterialDesktopCustomButton(
+            icon: Icon(theater.value ? Icons.width_normal_outlined : Icons.width_wide_outlined, semanticLabel: 'Theater mode'),
+            onPressed: () => theater.value = !theater.value,
+          ),
         const MaterialDesktopFullscreenButton(),
       ],
       // YouTube keys, minus seeking
@@ -457,13 +572,20 @@ class _PlayerPageState extends State<PlayerPage> {
         const SingleActivator(LogicalKeyboardKey.arrowDown): () => playback.player.setVolume(max(0, playback.player.state.volume - 5)),
         const SingleActivator(LogicalKeyboardKey.keyF): () => _videoKey.currentState?.toggleFullscreen(),
         const SingleActivator(LogicalKeyboardKey.escape): () => _videoKey.currentState?.exitFullscreen(),
+        const SingleActivator(LogicalKeyboardKey.keyT): () {
+          if (canTheater && !(_videoKey.currentState?.isFullscreen() ?? false)) theater.value = !theater.value;
+        },
         const SingleActivator(LogicalKeyboardKey.keyI): () {
           if (_videoKey.currentState?.isFullscreen() ?? false) return;
           minimize(context);
         },
       },
     );
-    final desktopFull = desktop.copyWith(topButtonBar: const []);
+    final desktopFull = desktop.copyWith(
+      topButtonBar: const [],
+      // fullscreen: no theater/mini-player buttons
+      bottomButtonBar: const [MaterialDesktopPlayOrPauseButton(), MaterialDesktopVolumeButton(), LiveBadge(), Spacer(), MaterialDesktopFullscreenButton()],
+    );
 
     return MaterialVideoControlsTheme(
       normal: mobile,
@@ -489,60 +611,77 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  Widget _details(Channel c) {
+  /// A row of source chips (shown when a channel has several streams).
+  Widget _sources(Channel c, {bool dense = false}) => SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
+    padding: dense ? const EdgeInsets.fromLTRB(12, 0, 12, 6) : EdgeInsets.zero,
+    child: Row(
+      children: [
+        for (var i = 0; i < c.streams.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              visualDensity: dense ? VisualDensity.compact : null,
+              label: Text(['Source ${i + 1}', ?c.streams[i].quality, ...c.streams[i].labels].join(' · '), style: dense ? const TextStyle(fontSize: 11) : null),
+              selected: playback.streamIndex == i,
+              onSelected: (_) => playback.playSource(i),
+            ),
+          ),
+      ],
+    ),
+  );
+
+  /// Name, country/categories, logo + My List, and source chips. [compact] for the
+  /// narrow side panel on phones held sideways.
+  Widget _info(Channel c, {bool compact = false}) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+      padding: compact ? const EdgeInsets.fromLTRB(4, 12, 12, 8) : const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(c.name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          Text(
+            c.name,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: compact ? 17 : 20, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 4),
-          Text(channelSubtitle(c), style: const TextStyle(color: Colors.white60, fontSize: 13)),
-          const SizedBox(height: 14),
+          Text(
+            channelSubtitle(c),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white60, fontSize: 13),
+          ),
+          SizedBox(height: compact ? 8 : 12),
           Row(
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                padding: const EdgeInsets.all(4),
-                decoration: const BoxDecoration(color: card, shape: BoxShape.circle),
-                child: c.logo == null
-                    ? const Icon(Icons.live_tv, size: 20)
-                    : ClipOval(
-                        child: Image.network(c.logo!, fit: BoxFit.contain, errorBuilder: (_, _, _) => const Icon(Icons.live_tv, size: 20)),
-                      ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  c.network ?? c.name,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                  overflow: TextOverflow.ellipsis,
+              if (!compact) ...[
+                Container(
+                  width: 40,
+                  height: 40,
+                  padding: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(color: card, shape: BoxShape.circle),
+                  child: c.logo == null
+                      ? const Icon(Icons.live_tv, size: 20)
+                      : ClipOval(
+                          child: Image.network(c.logo!, fit: BoxFit.contain, errorBuilder: (_, _, _) => const Icon(Icons.live_tv, size: 20)),
+                        ),
                 ),
-              ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    c.network ?? c.name,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ] else
+                const Spacer(),
               MyListButton(c),
             ],
           ),
-          ScheduleCard(c),
-          if (c.streams.length > 1) ...[
-            const SizedBox(height: 14),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (var i = 0; i < c.streams.length; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(['Source ${i + 1}', ?c.streams[i].quality, ...c.streams[i].labels].join(' · ')),
-                        selected: playback.streamIndex == i,
-                        onSelected: (_) => playback.playSource(i),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
+          if (c.streams.length > 1) ...[const SizedBox(height: 10), _sources(c)],
         ],
       ),
     );

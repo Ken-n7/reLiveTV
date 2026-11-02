@@ -45,7 +45,8 @@ void toggleSaved(Channel c) {
 /// "+ My List" / "✓ My List" button that stays in sync everywhere.
 class MyListButton extends StatelessWidget {
   final Channel c;
-  const MyListButton(this.c, {super.key});
+  final bool compact; // icon only, for tight spaces (phone held sideways)
+  const MyListButton(this.c, {super.key, this.compact = false});
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder(
@@ -53,6 +54,24 @@ class MyListButton extends StatelessWidget {
       builder: (context, keys, _) {
         final inList = keys.contains(c.key);
         // screen readers hear the state, not just "My List"
+        final icon = AnimatedSwitcher(
+          duration: motion(context, Durations.short4),
+          switchInCurve: Easing.emphasizedDecelerate,
+          switchOutCurve: Easing.emphasizedAccelerate,
+          transitionBuilder: (child, a) => ScaleTransition(
+            scale: a,
+            child: FadeTransition(opacity: a, child: child),
+          ),
+          child: Icon(inList ? Icons.check : Icons.add, key: ValueKey(inList)),
+        );
+        if (compact) {
+          return IconButton.filledTonal(
+            style: IconButton.styleFrom(backgroundColor: Colors.white12, foregroundColor: Colors.white),
+            tooltip: inList ? 'In My List' : 'Add to My List',
+            onPressed: () => toggleSaved(c),
+            icon: icon,
+          );
+        }
         return Semantics(
           toggled: inList,
           label: inList ? 'In My List' : 'Add to My List',
