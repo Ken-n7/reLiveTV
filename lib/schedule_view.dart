@@ -21,7 +21,7 @@ class SchedulePanel extends StatefulWidget {
 }
 
 class _SchedulePanelState extends State<SchedulePanel> {
-  late Future<List<Programme>> _schedule = schedules.load(widget.c.id);
+  late Future<ScheduleData> _schedule = schedules.load(widget.c.id);
   late final Timer _tick = Timer.periodic(const Duration(seconds: 30), (_) => setState(() {}));
 
   @override
@@ -68,11 +68,12 @@ class _SchedulePanelState extends State<SchedulePanel> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<Programme>>(
+    return FutureBuilder<ScheduleData>(
       future: _schedule,
       builder: (context, snap) {
         final now = DateTime.now().toUtc();
-        final upcoming = (snap.data ?? const <Programme>[]).where((p) => p.stop.isAfter(now)).toList();
+        final data = snap.data ?? ScheduleData.empty;
+        final upcoming = data.programmes.where((p) => p.stop.isAfter(now)).toList();
         final (off, label) = _zone();
         final channelOff = widget.c.timezone == null ? null : _offsets[widget.c.timezone];
         final deviceOff = DateTime.now().timeZoneOffset.inMinutes;
@@ -99,6 +100,31 @@ class _SchedulePanelState extends State<SchedulePanel> {
               ),
               const SizedBox(width: 8),
               const Spacer(),
+              // listings exist in several languages: let the viewer pick (remembered on the device)
+              if (data.langs.length > 1)
+                PopupMenuButton<String>(
+                  tooltip: 'Schedule language',
+                  initialValue: data.lang,
+                  onSelected: (lang) => setState(() {
+                    scheduleLang = lang;
+                    _schedule = schedules.load(widget.c.id);
+                  }),
+                  itemBuilder: (_) => [for (final l in data.langs) PopupMenuItem(value: l, child: Text(languageName(l)))],
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    child: compact
+                        ? const Icon(Icons.translate, size: 18)
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.translate, size: 16),
+                              const SizedBox(width: 4),
+                              Text(languageName(data.lang ?? data.langs.first), style: const TextStyle(fontSize: 13)),
+                              const Icon(Icons.arrow_drop_down, size: 18),
+                            ],
+                          ),
+                  ),
+                ),
               if (upcoming.isNotEmpty && compact)
                 IconButton(visualDensity: VisualDensity.compact, iconSize: 18, tooltip: 'Times: $label', icon: const Icon(Icons.schedule), onPressed: pickZone)
               else if (upcoming.isNotEmpty)

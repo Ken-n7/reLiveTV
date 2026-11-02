@@ -1,7 +1,9 @@
 """Builds the channel list for iptv-org's schedule grabber: every channel reLiveTV
-can play that has a schedule on one of the sites in tool/epg_sites.txt.
+can play that has a schedule on one of the sites in tool/epg_sites.txt, in every
+language those sites offer (one site per channel and language), plus each channel's
+language order (best first) for the splitter.
 
-Usage: python3 tool/epg_channels.py tool/epg_sites.txt channels.xml
+Usage: python3 tool/epg_channels.py tool/epg_sites.txt channels.xml channel_langs.json
 """
 import json
 import sys
@@ -31,9 +33,10 @@ ISO3_TO_1 = {
 
 
 def build(sites, streams, channels, blocklist, guides, feeds=()):
-    """Pure: returns <channel> lines, one guide source per channel. Picks a source in the
-    channel's own language first, then English, then anything; ties go to the first site
-    in `sites` (a US channel listed by a Russian site must not get Russian listings)."""
+    """Pure: returns (<channel> lines, {channel: [languages, best first]}).
+    One guide source per channel and language (first site in `sites` wins). Language
+    order: the channel's main language, its other languages, English, then the rest
+    (a US channel listed by a Russian site must not default to Russian listings)."""
     hidden = {b.get("channel") for b in blocklist}
     hidden |= {c["id"] for c in channels if c.get("closed") or c.get("is_nsfw")}
     playable = {
@@ -48,42 +51,43 @@ def build(sites, streams, channels, blocklist, guides, feeds=()):
             main_lang.setdefault(f.get("channel"), langs[0])
             spoken.setdefault(f.get("channel"), set()).update(langs)
 
-    def score(e):
-        lang, ch = e.get("lang"), e["channel"]
+    def fit(ch, lang):
         if lang == main_lang.get(ch):
-            fit = 0  # the channel's main language
-        elif lang in spoken.get(ch, ()):
-            fit = 1  # another language it broadcasts in (e.g. a second audio track)
-        elif lang == "en":
-            fit = 2
-        else:
-            fit = 3
-        return (fit, rank[e["site"]])
+            return 0  # the channel's main language
+        if lang in spoken.get(ch, ()):
+            return 1  # another language it broadcasts in (e.g. a second audio track)
+        return 2 if lang == "en" else 3
 
-    best = {}  # channel -> guide entry
+    best = {}  # (channel, lang) -> guide entry
     for e in guides:
-        ch, site = e.get("channel"), e.get("site")
+        ch, site, lang = e.get("channel"), e.get("site"), e.get("lang") or "en"
         if ch not in playable or site not in rank or not e.get("site_id"):
             continue
-        if ch not in best or score(e) < score(best[ch]):
-            best[ch] = e
-    lines = []
-    for ch, e in sorted(best.items()):
+        key = (ch, lang)
+        if key not in best or rank[site] < rank[best[key]["site"]]:
+            best[key] = e
+    lines, order = [], {}
+    for (ch, lang), e in sorted(best.items()):
         xmltv_id = ch + (f"@{e['feed']}" if e.get("feed") else "")
         lines.append(
-            f'  <channel site={quoteattr(e["site"])} lang={quoteattr(e.get("lang") or "en")} '
+            f'  <channel site={quoteattr(e["site"])} lang={quoteattr(lang)} '
             f'xmltv_id={quoteattr(xmltv_id)} site_id={quoteattr(e["site_id"])}>{escape(e.get("site_name") or ch)}</channel>'
         )
-    return lines
+        order.setdefault(ch, []).append(lang)
+    for ch, langs in order.items():
+        langs.sort(key=lambda l: (fit(ch, l), rank[best[(ch, l)]["site"]]))
+    return lines, order
 
 
-def main(sites_file, out):
+def main(sites_file, out, langs_out):
     sites = [l.strip() for l in open(sites_file) if l.strip() and not l.lstrip().startswith("#")]
-    lines = build(sites, get("streams"), get("channels"), get("blocklist"), get("guides"), get("feeds"))
+    lines, order = build(sites, get("streams"), get("channels"), get("blocklist"), get("guides"), get("feeds"))
     with open(out, "w", encoding="utf-8") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n<channels>\n' + "\n".join(lines) + "\n</channels>\n")
-    print(f"{len(lines)} channels from {len(sites)} sites")
+    with open(langs_out, "w", encoding="utf-8") as f:
+        json.dump(order, f, separators=(",", ":"))
+    print(f"{len(order)} channels, {len(lines)} channel-language sources from {len(sites)} sites")
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:3])
+    main(*sys.argv[1:4])
