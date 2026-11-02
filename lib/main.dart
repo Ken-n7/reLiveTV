@@ -3,13 +3,13 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'catalog.dart';
 import 'data.dart';
 import 'layout.dart';
 import 'motion.dart';
 import 'player.dart';
+import 'settings.dart';
 
 const appName = 'reLiveTV';
 const bg = Color(0xFF141414);
@@ -25,13 +25,12 @@ class Wordmark extends StatelessWidget {
 
 /// Keys of channels in My List, saved on the device.
 final saved = ValueNotifier<Set<String>>({});
-late final SharedPreferences _prefs;
 
 void toggleSaved(Channel c) {
   final next = {...saved.value};
   if (!next.remove(c.key)) next.add(c.key);
   saved.value = next;
-  _prefs.setStringList('saved', next.toList());
+  prefs.setStringList('saved', next.toList());
 }
 
 /// "+ My List" / "✓ My List" button that stays in sync everywhere.
@@ -64,8 +63,8 @@ class MyListButton extends StatelessWidget {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
-  _prefs = await SharedPreferences.getInstance();
-  saved.value = {...?_prefs.getStringList('saved')};
+  await initSettings();
+  saved.value = {...?prefs.getStringList('saved')};
   // decode logos at card size and keep the in-memory image cache modest
   PaintingBinding.instance.imageCache
     ..maximumSize = 300
@@ -106,7 +105,7 @@ void _followRenames() {
   final next = {for (final k in saved.value) renames[k] ?? k};
   if (next.length == saved.value.length && next.containsAll(saved.value)) return;
   saved.value = next;
-  _prefs.setStringList('saved', next.toList());
+  prefs.setStringList('saved', next.toList());
 }
 
 class HomePage extends StatefulWidget {
@@ -436,13 +435,27 @@ class _ChannelCardState extends State<ChannelCard> {
             ),
             child: AspectRatio(
               aspectRatio: 16 / 9,
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Center(
-                  child: c.logo == null
-                      ? Text(c.name, textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold))
-                      : Image.network(c.logo!, fit: BoxFit.contain, cacheWidth: 360, frameBuilder: fadeInFrame, errorBuilder: (_, _, _) => const Icon(Icons.live_tv, size: 40)),
-                ),
+              child: Stack(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Center(
+                      child: c.logo == null
+                          ? Text(c.name, textAlign: TextAlign.center, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold))
+                          : Image.network(c.logo!, fit: BoxFit.contain, cacheWidth: 360, frameBuilder: fadeInFrame, errorBuilder: (_, _, _) => const Icon(Icons.live_tv, size: 40)),
+                    ),
+                  ),
+                  if (c.badges.isNotEmpty)
+                    Positioned(
+                      top: 6,
+                      left: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(3)),
+                        child: Text(c.badges.join(' · '), style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),

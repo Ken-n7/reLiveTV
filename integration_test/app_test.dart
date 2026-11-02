@@ -10,6 +10,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart' show timeDilation;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:tv_channels/catalog.dart';
 import 'package:tv_channels/main.dart' as app;
 import 'package:tv_channels/player.dart';
 
@@ -139,5 +140,41 @@ void main() {
     await resize(t, const Size(1300, 760));
     await shot(t, 'expanded-bigtext');
     // reaching here without a "RenderFlex overflowed" error is the check
+    t.platformDispatcher.clearTextScaleFactorTestValue();
+
+    // ---- failover: a dead source (connection refused) is retried 3x, then the next source
+    const dead = 'http://127.0.0.1:9/dead.m3u8';
+    final real = app.store.catalog.value!.channels.firstWhere((c) => c.id == 'PremierSports2.ph', orElse: () => app.store.catalog.value!.channels.first);
+    final mixed = Channel(id: null, name: 'Failover test', streams: [StreamSource(url: dead, quality: '2160p'), ...real.streams]);
+    openChannel(mixed);
+    final seen = <String>{};
+    for (var i = 0; i < 90 && playback.sourceNumber < 2; i++) {
+      seen.add('${playback.status.name} ${playback.attempt}');
+      await wait(t, 500);
+    }
+    expect(seen, containsAll(['retrying 2', 'retrying 3']), reason: 'retried the dead source before moving on');
+    expect(playback.sourceNumber, 2, reason: 'moved to the next source');
+    await shot(t, 'failover-next');
+    for (var i = 0; i < 40 && playback.status != PlayStatus.playing; i++) {
+      await wait(t, 500);
+    }
+    // ignore: avoid_print
+    print('real source after failover: ${playback.status.name}');
+    navigatorKey.currentState!.maybePop();
+    await wait(t, 800);
+    playback.close();
+
+    // ---- only dead sources: ends with a clear message and Try again
+    openChannel(Channel(id: null, name: 'Dead test', streams: [StreamSource(url: dead)]));
+    for (var i = 0; i < 90 && playback.status != PlayStatus.failed; i++) {
+      await wait(t, 500);
+    }
+    expect(playback.status, PlayStatus.failed);
+    await waitFor(t, find.text('Try again'));
+    expect(find.textContaining("isn't responding"), findsOneWidget);
+    await shot(t, 'failed');
+    navigatorKey.currentState!.maybePop();
+    await wait(t, 800);
+    playback.close();
   });
 }
