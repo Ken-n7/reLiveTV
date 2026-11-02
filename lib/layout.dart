@@ -23,3 +23,9 @@ double cardTextHeight(BuildContext context) {
 }
 
 double cardHeightFor(BuildContext context, double width) => width * 9 / 16 + cardTextHeight(context);
+
+/// Phones/tablets: don't pop the on-screen keyboard open unasked.
+bool isTouchOnly(BuildContext context) => switch (Theme.of(context).platform) {
+  TargetPlatform.android || TargetPlatform.iOS => true,
+  _ => false,
+};

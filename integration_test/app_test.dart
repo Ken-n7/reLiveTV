@@ -6,11 +6,13 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart' show timeDilation;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:tv_channels/catalog.dart';
+import 'package:tv_channels/discover.dart';
 import 'package:tv_channels/failover.dart';
 import 'package:tv_channels/main.dart' as app;
 import 'package:tv_channels/player.dart';
@@ -62,7 +64,7 @@ Future<void> resize(WidgetTester t, Size size) async {
 }
 
 /// Cards in Discover's rows (the hidden Home grid has cards too).
-final rowCard = find.descendant(of: find.byType(app.ChannelRow), matching: find.byType(app.ChannelCard));
+final rowCard = find.descendant(of: find.byType(ChannelRow), matching: find.byType(app.ChannelCard));
 
 final miniCard = find.descendant(of: find.byType(MiniPlayer), matching: find.byType(Material)).first;
 
@@ -220,6 +222,76 @@ void main() {
     navigatorKey.currentState!.maybePop();
     await wait(t, 800);
     playback.close();
+
+    // ---- Discover = browse + search in one screen
+    final discover = find.byType(DiscoverScreen);
+    final searchField = find.descendant(of: discover, matching: find.byType(TextField));
+    expect(find.byTooltip('Search'), findsNothing, reason: 'separate search page is gone');
+    await t.enterText(searchField, 'news');
+    await wait(t, 800);
+    expect(find.textContaining(RegExp(r'^\d+ channels?$')), findsOneWidget);
+    await shot(t, 'search');
+
+    // Esc clears the search, rows come back
+    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+    await wait(t, 800);
+    expect(find.byType(ChannelRow), findsWidgets);
+
+    // "See all" applies that category
+    await t.tap(find.textContaining('See all').first);
+    await wait(t, 800);
+    expect(find.text('Clear all'), findsOneWidget);
+    await t.tap(find.text('Clear all'));
+    await wait(t, 800);
+
+    // Country picker: searchable, filters the results
+    await t.tap(find.text('Country'));
+    await waitFor(t, find.text('Country or region'));
+    await t.enterText(find.descendant(of: find.byType(BottomSheet), matching: find.byType(TextField)), 'philipp');
+    await wait(t, 500);
+    await shot(t, 'country-picker');
+    await t.tap(find.descendant(of: find.byType(BottomSheet), matching: find.textContaining('Philippines')).first);
+    await wait(t, 1000);
+    final shown = t.widgetList<app.ChannelCard>(find.byType(app.ChannelCard).hitTestable());
+    expect(shown, isNotEmpty);
+    expect(shown.every((card) => card.c.countryCode == 'PH'), isTrue, reason: 'only Philippine channels');
+    await shot(t, 'country-results');
+
+    // no results: says so, with one tap to drop each filter
+    await t.enterText(searchField, 'zzqqxx');
+    await wait(t, 800);
+    expect(find.textContaining('No channels match'), findsOneWidget);
+    expect(find.byType(InputChip), findsNWidgets(2), reason: 'the query and the country');
+    await shot(t, 'no-results');
+    await t.tap(find.text('Clear all').last);
+    await wait(t, 800);
+    expect(find.byType(ChannelRow), findsWidgets);
+
+    // keyboard: '/' focuses search; arrows move between cards with a visible focus ring
+    FocusManager.instance.primaryFocus?.unfocus();
+    await wait(t, 300);
+    await t.sendKeyEvent(LogicalKeyboardKey.slash);
+    await wait(t, 300);
+    expect(FocusManager.instance.primaryFocus?.context?.findAncestorWidgetOfExactType<TextField>(), isNotNull, reason: '/ focuses search');
+    app.ChannelCard? focusedCard() => FocusManager.instance.primaryFocus?.context?.findAncestorWidgetOfExactType<app.ChannelCard>();
+    for (var i = 0; i < 12 && focusedCard() == null; i++) {
+      await t.sendKeyEvent(LogicalKeyboardKey.tab);
+      await wait(t, 150);
+    }
+    final first = focusedCard();
+    expect(first, isNotNull, reason: 'Tab reaches the cards');
+    await t.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await wait(t, 400);
+    expect(focusedCard(), isNotNull);
+    expect(focusedCard()!.c, isNot(first!.c), reason: 'arrow keys move to the next card');
+    await shot(t, 'focus');
+
+    // screen readers: a card is one item with its name and details
+    final sem = t.ensureSemantics();
+    final label = t.getSemantics(find.byType(app.ChannelCard).hitTestable().first).label;
+    expect(label, contains(t.widget<app.ChannelCard>(find.byType(app.ChannelCard).hitTestable().first).c.name));
+    sem.dispose();
+    FocusManager.instance.primaryFocus?.unfocus();
 
     // ---- settings sheet
     await t.tap(find.byTooltip('Settings').hitTestable().first);
