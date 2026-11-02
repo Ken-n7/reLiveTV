@@ -9,6 +9,14 @@ import 'settings.dart';
 /// App-specific native calls (Android: MainActivity.kt). No plugins needed.
 const platform = MethodChannel('relivetv/platform');
 
+/// Running on a TV (Android TV / Google TV / Fire TV): 10-foot layout, remote-friendly player.
+/// `--dart-define=FORCE_TV=true` previews it on a laptop.
+bool isTv = const bool.fromEnvironment('FORCE_TV');
+
+Future<void> detectTv() async {
+  if (!isTv && Platform.isAndroid) isTv = await platform.invokeMethod<bool>('isTv') ?? false;
+}
+
 /// True while Android shows the video in its floating picture-in-picture window.
 final inPip = ValueNotifier(false);
 

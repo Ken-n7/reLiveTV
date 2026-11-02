@@ -2,6 +2,7 @@ package com.ken.tv_channels
 
 import android.Manifest
 import android.app.PictureInPictureParams
+import android.app.UiModeManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -52,6 +53,9 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "abis" -> result.success(Build.SUPPORTED_ABIS.toList())
+                "isTv" -> result.success(
+                    (getSystemService(UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+                )
                 "sha256" -> result.success(sha256(File(call.arguments as String)))
                 "installApk" -> {
                     // Android asks once whether reLiveTV may install apps; it also refuses an APK

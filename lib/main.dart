@@ -89,6 +89,7 @@ Future<void> main() async {
   store.catalog.addListener(_followRenames);
   unawaited(store.start());
   initPlatform();
+  await detectTv();
   unawaited(schedules.cleanUp().then((_) {}, onError: (_) {})); // drop schedules that ran out
   // quiet daily check for a newer release (never blocks or nags; failures are ignored)
   unawaited(updates.check(appVersion).then((_) {}, onError: (_) {}));
@@ -114,20 +115,22 @@ Future<void> main() async {
       ),
       navigatorKey: navigatorKey,
       navigatorObservers: [popupObserver],
-      builder: (context, child) => ValueListenableBuilder(
-        valueListenable: inPip,
-        // picture-in-picture: only the video; the app stays alive underneath (Offstage keeps state)
-        builder: (context, pip, _) => Stack(
-          children: [
-            Offstage(offstage: pip, child: child),
-            if (pip)
-              const ColoredBox(
-                color: Colors.black,
-                child: SizedBox.expand(child: PipVideo()),
-              )
-            else
-              const MiniPlayer(),
-          ],
+      builder: (context, child) => _TvFrame(
+        child: ValueListenableBuilder(
+          valueListenable: inPip,
+          // picture-in-picture: only the video; the app stays alive underneath (Offstage keeps state)
+          builder: (context, pip, _) => Stack(
+            children: [
+              Offstage(offstage: pip, child: child),
+              if (pip)
+                const ColoredBox(
+                  color: Colors.black,
+                  child: SizedBox.expand(child: PipVideo()),
+                )
+              else
+                const MiniPlayer(),
+            ],
+          ),
         ),
       ),
       home: const HomePage(),
@@ -647,6 +650,32 @@ class UpdateBanner extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// On TVs: keep everything inside the 5% overscan margin TVs may crop, and make
+/// text a little bigger for viewing across a room. Elsewhere: no change.
+class _TvFrame extends StatelessWidget {
+  final Widget child;
+  const _TvFrame({required this.child});
+  @override
+  Widget build(BuildContext context) {
+    if (!isTv) return child;
+    final mq = MediaQuery.of(context);
+    final margin = EdgeInsets.symmetric(horizontal: mq.size.width * 0.05, vertical: mq.size.height * 0.05);
+    return ColoredBox(
+      color: Colors.black,
+      child: Padding(
+        padding: margin,
+        child: MediaQuery(
+          data: mq.copyWith(
+            size: Size(mq.size.width - margin.horizontal, mq.size.height - margin.vertical),
+            textScaler: TextScaler.linear(mq.textScaler.scale(1) * 1.15),
+          ),
+          child: child,
+        ),
+      ),
     );
   }
 }

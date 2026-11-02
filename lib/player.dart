@@ -12,6 +12,7 @@ import 'failover.dart';
 import 'layout.dart';
 import 'main.dart' show MyListButton, card, channelSubtitle;
 import 'motion.dart';
+import 'platform.dart' show isTv;
 import 'schedule_view.dart';
 import 'settings.dart';
 
@@ -447,6 +448,10 @@ class _PlayerPageState extends State<PlayerPage> {
         const SingleActivator(LogicalKeyboardKey.space): () => playback.player.playOrPause(),
         const SingleActivator(LogicalKeyboardKey.keyK): () => playback.player.playOrPause(),
         const SingleActivator(LogicalKeyboardKey.mediaPlayPause): () => playback.player.playOrPause(),
+        // TV remotes: centre/Select and the dedicated play/pause buttons
+        const SingleActivator(LogicalKeyboardKey.select): () => playback.player.playOrPause(),
+        const SingleActivator(LogicalKeyboardKey.mediaPlay): () => playback.player.play(),
+        const SingleActivator(LogicalKeyboardKey.mediaPause): () => playback.player.pause(),
         const SingleActivator(LogicalKeyboardKey.keyM): () => playback.player.setVolume(playback.player.state.volume > 0 ? 0 : 100),
         const SingleActivator(LogicalKeyboardKey.arrowUp): () => playback.player.setVolume(min(100, playback.player.state.volume + 5)),
         const SingleActivator(LogicalKeyboardKey.arrowDown): () => playback.player.setVolume(max(0, playback.player.state.volume - 5)),
@@ -470,7 +475,13 @@ class _PlayerPageState extends State<PlayerPage> {
           fit: StackFit.expand,
           children: [
             // pausing on leaving the app is ours to decide (Background play setting), not the widget's
-            Video(key: _videoKey, controller: playback.video, pauseUponEnteringBackgroundMode: false),
+            Video(
+              key: _videoKey,
+              controller: playback.video,
+              pauseUponEnteringBackgroundMode: false,
+              // TVs have a remote, not a touchscreen: use the keyboard-driven controls
+              controls: isTv ? MaterialDesktopVideoControls : AdaptiveVideoControls,
+            ),
             StatusOverlay(c),
           ],
         ),
@@ -689,7 +700,10 @@ class _MiniCard extends StatelessWidget {
                     onPressed: playback.player.playOrPause,
                   ),
                 ),
-                IconButton(icon: const Icon(Icons.close, semanticLabel: 'Close'), onPressed: playback.close),
+                IconButton(
+                  icon: const Icon(Icons.close, semanticLabel: 'Close'),
+                  onPressed: playback.close,
+                ),
               ],
             ),
           ),

@@ -1,7 +1,7 @@
 """Draws the reLiveTV icon: a white TV outline with "rL" inside, on black.
 
 Re-run after changing the drawing:  python3 tool/make_icon.py
-Writes Android launcher icons (adaptive + legacy square/round) and a Linux icon.
+Writes Android launcher icons (adaptive + legacy square/round), the Android TV banner and a Linux icon.
 Needs Pillow and the DejaVu Sans Bold font (Debian/Ubuntu: fonts-dejavu-core).
 """
 from pathlib import Path
@@ -77,6 +77,17 @@ def main():
     (RES / "values/ic_launcher_background.xml").write_text(
         '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">#000000</color>\n</resources>\n'
     )
+
+    # Android TV home screen banner (320x180 at xhdpi): icon + name
+    banner_dir = RES / "drawable-xhdpi"
+    banner_dir.mkdir(parents=True, exist_ok=True)
+    W, H = 320 * SS, 180 * SS
+    banner = Image.new("RGBA", (W, H), BLACK)
+    mark = tv(150 * SS, 0.9, None)
+    banner.alpha_composite(mark, (16 * SS, 15 * SS))
+    d = ImageDraw.Draw(banner)
+    d.text((176 * SS, H // 2), "reLiveTV", font=ImageFont.truetype(FONT, 26 * SS), fill=WHITE, anchor="lm")
+    banner.resize((320, 180), Image.LANCZOS).save(banner_dir / "tv_banner.png")
 
     linux = ROOT / "linux/relivetv.png"
     tv(256, 0.7, BLACK).save(linux)
