@@ -12,21 +12,18 @@ void main() {
     expect(compareVersions('1.0.0-dev', '1.0.0'), isNull);
   });
 
-  test('release parsing keeps only this repo\'s download links', () {
-    final r = parseRelease({
-      'tag_name': 'v1.2.0',
-      'html_url': 'https://github.com/Ken-n7/reLiveTV/releases/tag/v1.2.0',
-      'assets': [
-        {'name': 'relivetv-1.2.0-android-arm64-v8a.apk', 'browser_download_url': '$dl/relivetv-1.2.0-android-arm64-v8a.apk'},
-        {'name': 'SHA256SUMS', 'browser_download_url': '$dl/SHA256SUMS'},
-        {'name': 'evil.apk', 'browser_download_url': 'https://evil.example/evil.apk'},
-        {'name': '../x.apk', 'browser_download_url': '$dl/x.apk'},
-      ],
-    })!;
+  test('latest release comes from its SHA256SUMS; links are always this repo\'s', () {
+    final a = 'a' * 64, b = 'b' * 64, c = 'c' * 64;
+    final r = releaseFromSums('$a  relivetv-1.2.0-android-arm64-v8a.apk\n$b  relivetv-1.2.0-linux-x64.tar.gz\n$c  ../evil.apk\n')!;
     expect(r.version, '1.2.0');
-    expect(r.assets.keys, ['relivetv-1.2.0-android-arm64-v8a.apk', 'SHA256SUMS']);
-    expect(parseRelease({'tag_name': 'nightly'}), isNull);
-    expect(parseRelease('garbage'), isNull);
+    expect(r.pageUrl, 'https://github.com/Ken-n7/reLiveTV/releases/tag/v1.2.0');
+    expect(r.assets, {
+      'relivetv-1.2.0-android-arm64-v8a.apk': '$dl/relivetv-1.2.0-android-arm64-v8a.apk',
+      'relivetv-1.2.0-linux-x64.tar.gz': '$dl/relivetv-1.2.0-linux-x64.tar.gz',
+    });
+    expect(r.sums['relivetv-1.2.0-android-arm64-v8a.apk'], a);
+    expect(r.sums.containsKey('../evil.apk'), isFalse);
+    expect(releaseFromSums('<html>not found</html>'), isNull);
   });
 
   test('APK for this device CPU', () {
