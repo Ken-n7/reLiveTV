@@ -393,8 +393,14 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   Widget _video(BuildContext context, Channel c) {
-    final chevron = MaterialCustomButton(icon: const Icon(Icons.keyboard_arrow_down), onPressed: () => minimize(context));
-    final gear = MaterialCustomButton(icon: const Icon(Icons.settings_outlined), onPressed: showQualitySheet);
+    final chevron = MaterialCustomButton(
+      icon: const Icon(Icons.keyboard_arrow_down, semanticLabel: 'Minimize'),
+      onPressed: () => minimize(context),
+    );
+    final gear = MaterialCustomButton(
+      icon: const Icon(Icons.settings_outlined, semanticLabel: 'Quality'),
+      onPressed: showQualitySheet,
+    );
     final mobile = MaterialVideoControlsThemeData(
       displaySeekBar: false, // live TV: nothing to seek
       seekGesture: false,
@@ -414,14 +420,25 @@ class _PlayerPageState extends State<PlayerPage> {
       displaySeekBar: false,
       automaticallyImplySkipNextButton: false,
       automaticallyImplySkipPreviousButton: false,
-      topButtonBar: [MaterialDesktopCustomButton(icon: const Icon(Icons.keyboard_arrow_down), onPressed: () => minimize(context))],
+      topButtonBar: [
+        MaterialDesktopCustomButton(
+          icon: const Icon(Icons.keyboard_arrow_down, semanticLabel: 'Minimize'),
+          onPressed: () => minimize(context),
+        ),
+      ],
       bottomButtonBar: [
         const MaterialDesktopPlayOrPauseButton(),
         const MaterialDesktopVolumeButton(),
         const LiveBadge(),
         const Spacer(),
-        MaterialDesktopCustomButton(icon: const Icon(Icons.settings_outlined), onPressed: showQualitySheet),
-        MaterialDesktopCustomButton(icon: const Icon(Icons.picture_in_picture_alt_outlined), onPressed: () => minimize(context)),
+        MaterialDesktopCustomButton(
+          icon: const Icon(Icons.settings_outlined, semanticLabel: 'Quality'),
+          onPressed: showQualitySheet,
+        ),
+        MaterialDesktopCustomButton(
+          icon: const Icon(Icons.picture_in_picture_alt_outlined, semanticLabel: 'Mini player'),
+          onPressed: () => minimize(context),
+        ),
         const MaterialDesktopFullscreenButton(),
       ],
       // YouTube keys, minus seeking
@@ -529,7 +546,10 @@ class StatusOverlay extends StatelessWidget {
     switch (playback.status) {
       case PlayStatus.noStreams:
         return const IgnorePointer(
-          child: ColoredBox(color: Colors.black87, child: Center(child: Text('No streams for this channel.'))),
+          child: ColoredBox(
+            color: Colors.black87,
+            child: Center(child: Text('No streams for this channel.')),
+          ),
         );
       case PlayStatus.failed:
         final n = c.streams.length;
@@ -541,7 +561,11 @@ class StatusOverlay extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text("This channel isn't responding right now.", textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w600)),
+                  const Text(
+                    "This channel isn't responding right now.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
                   const SizedBox(height: 4),
                   Text(
                     'Tried ${n == 1 ? 'its source' : 'all $n sources'}, ${Failover.attemptsPerSource} times each.',
@@ -657,9 +681,13 @@ class _MiniCard extends StatelessWidget {
                 StreamBuilder<bool>(
                   stream: playback.player.stream.playing,
                   initialData: playback.player.state.playing,
-                  builder: (_, snap) => IconButton(icon: Icon(snap.data! ? Icons.pause : Icons.play_arrow), onPressed: playback.player.playOrPause),
+                  // no tooltips here: the mini player sits outside the Navigator, so there is no Overlay for them
+                  builder: (_, snap) => IconButton(
+                    icon: Icon(snap.data! ? Icons.pause : Icons.play_arrow, semanticLabel: snap.data! ? 'Pause' : 'Play'),
+                    onPressed: playback.player.playOrPause,
+                  ),
                 ),
-                IconButton(icon: const Icon(Icons.close), onPressed: playback.close),
+                IconButton(icon: const Icon(Icons.close, semanticLabel: 'Close'), onPressed: playback.close),
               ],
             ),
           ),
