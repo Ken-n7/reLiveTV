@@ -129,7 +129,7 @@ Future<void> main() async {
         ),
         appBarTheme: const AppBarTheme(backgroundColor: bg, surfaceTintColor: Colors.transparent),
         pageTransitionsTheme: const PageTransitionsTheme(
-          builders: {TargetPlatform.android: FadeForwardsPageTransitionsBuilder(), TargetPlatform.linux: FadeForwardsPageTransitionsBuilder()},
+          builders: {TargetPlatform.android: FadeForwardsPageTransitionsBuilder(), TargetPlatform.linux: FadeForwardsPageTransitionsBuilder(), TargetPlatform.windows: FadeForwardsPageTransitionsBuilder()},
         ),
       ),
       navigatorKey: navigatorKey,

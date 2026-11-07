@@ -1,0 +1,68 @@
+name: windows
+
+# Builds the Windows app and drives it with the integration tests on a real
+# Windows machine. The zip is kept as a workflow artifact for manual testing.
+on:
+  push:
+    branches: [main, windows]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: 3.38.7
+          cache: true
+
+      - name: Unit tests
+        run: |
+          flutter pub get
+          flutter test
+
+      - name: Build
+        run: flutter build windows --release
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath relivetv-windows-x64.zip
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relivetv-windows-x64
+          path: relivetv-windows-x64.zip
+          retention-days: 14
+
+      # One file per command: a second app launch in the same `flutter test`
+      # run fails to attach on Windows.
+      - name: Integration tests (real app, real network)
+        run: |
+          New-Item -ItemType Directory -Force "${{ runner.temp }}/shots" | Out-Null
+          flutter test integration_test/app_test.dart -d windows --dart-define=SHOT_DIR=${{ runner.temp }}/shots
+
+      - name: TV mode integration test
+        if: always()
+        run: flutter test integration_test/tv_test.dart -d windows --dart-define=FORCE_TV=true --dart-define=SHOT_DIR=${{ runner.temp }}/shots
+
+      - name: Screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screenshots
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: ignore
+          retention-days: 14
