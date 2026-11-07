@@ -5,6 +5,24 @@ public channel list maintained by [iptv-org](https://github.com/iptv-org) and
 plays the streams on your device — with search, filters, a mini player and
 background play.
 
+## Download
+
+Get the latest build from **[Releases](https://github.com/Ken-n7/reLiveTV/releases/latest)**.
+
+- **Android**: most phones need `relivetv-*-android-arm64-v8a.apk`. Older
+  32-bit phones need `armeabi-v7a`, and emulators need `x86_64`. Open the
+  APK and allow installing from unknown sources when Android asks.
+- **Linux**: download `relivetv-*-linux-x64.tar.gz`. It needs libmpv
+  (`libmpv2` on Debian/Ubuntu). The archive has no top-level folder, so
+  extract it into its own directory:
+
+  ```sh
+  mkdir relivetv && tar xzf relivetv-*-linux-x64.tar.gz -C relivetv
+  ./relivetv/tv_channels
+  ```
+
+Each release includes a `SHA256SUMS` file for checking the downloads.
+
 ## Features
 
 - **Browse and search in one place**: category rows, a search bar that matches
