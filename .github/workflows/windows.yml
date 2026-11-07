@@ -47,10 +47,16 @@ jobs:
           path: relivetv-windows-x64.zip
           retention-days: 14
 
+      # One file per command: a second app launch in the same `flutter test`
+      # run fails to attach on Windows.
       - name: Integration tests (real app, real network)
         run: |
           New-Item -ItemType Directory -Force "${{ runner.temp }}/shots" | Out-Null
-          flutter test integration_test -d windows --dart-define=SHOT_DIR=${{ runner.temp }}/shots
+          flutter test integration_test/app_test.dart -d windows --dart-define=SHOT_DIR=${{ runner.temp }}/shots
+
+      - name: TV mode integration test
+        if: always()
+        run: flutter test integration_test/tv_test.dart -d windows --dart-define=FORCE_TV=true --dart-define=SHOT_DIR=${{ runner.temp }}/shots
 
       - name: Screenshots
         if: always()
