@@ -14,7 +14,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Flutter only builds Windows apps on Windows, so this runs on its own machine
+  # and hands the zip to the release job.
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: 3.38.7
+          cache: true
+
+      - name: Windows (x64)
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          flutter pub get
+          flutter build windows --release --build-name "$VERSION" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$VERSION"
+          mkdir -p dist
+          pwsh -Command "Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/relivetv-$VERSION-windows-x64.zip"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows
+          path: dist/
+          retention-days: 1
+
   release:
+    needs: windows
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -66,6 +98,11 @@ jobs:
           flutter build linux --release --build-name "$VERSION" --build-number "$GITHUB_RUN_NUMBER" --dart-define=APP_VERSION="$VERSION"
           cp linux/relivetv.png build/linux/x64/release/bundle/relivetv.png
           tar -czf "dist/relivetv-$VERSION-linux-x64.tar.gz" -C build/linux/x64/release/bundle .
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows
+          path: dist/
 
       - name: Checksums
         working-directory: dist

@@ -1,6 +1,6 @@
 # reLiveTV
 
-A free, open-source live TV player for Android and Linux. It browses the
+A free, open-source live TV player for Android, Linux and Windows. It browses the
 public channel list maintained by [iptv-org](https://github.com/iptv-org) and
 plays the streams on your device — with search, filters, a mini player and
 background play.
@@ -20,6 +20,11 @@ Get the latest build from **[Releases](https://github.com/Ken-n7/reLiveTV/releas
   mkdir relivetv && tar xzf relivetv-*-linux-x64.tar.gz -C relivetv
   ./relivetv/tv_channels
   ```
+
+- **Windows** (10 or 11, 64-bit): download `relivetv-*-windows-x64.zip`,
+  extract it, and run `relivetv.exe`. Nothing else needs installing. The app
+  isn't code-signed, so SmartScreen says "Windows protected your PC" the first
+  time. Click **More info**, then **Run anyway**.
 
 Each release includes a `SHA256SUMS` file for checking the downloads.
 
@@ -57,12 +62,14 @@ the stream servers of the channels you open.
 
 ## Build from source
 
-Requires [Flutter](https://flutter.dev) (stable) and, on Linux, `clang`,
-`libgtk-3-dev` and `libmpv-dev`.
+Requires [Flutter](https://flutter.dev) (stable). On Linux it also needs
+`clang`, `libgtk-3-dev` and `libmpv-dev`. On Windows it needs Visual Studio
+with the "Desktop development with C++" workload.
 
 ```sh
 flutter pub get
 flutter run -d linux                 # desktop
+flutter run -d windows               # desktop (Windows)
 flutter build apk --release          # Android
 ```
 
