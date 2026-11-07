@@ -97,11 +97,14 @@ class Updates {
   }
 
   /// Android: download, verify the checksum, hand to the system installer.
-  /// Linux: open the release page (manual download).
+  /// Desktop: open the release page in the browser (manual download).
   /// Returns 'needsPermission' when Android first has to allow installs.
   Future<String?> install(Release r) async {
     if (!Platform.isAndroid) {
-      await Process.run('xdg-open', [r.pageUrl]);
+      // rundll32 opens the URL without going through a shell (no cmd quoting).
+      await (Platform.isWindows
+          ? Process.run('rundll32', ['url.dll,FileProtocolHandler', r.pageUrl])
+          : Process.run('xdg-open', [r.pageUrl]));
       return null;
     }
     final abis = (await platform.invokeListMethod<String>('abis')) ?? const [];

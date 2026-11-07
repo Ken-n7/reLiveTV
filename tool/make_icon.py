@@ -1,7 +1,7 @@
 """Draws the reLiveTV icon: a white TV outline with "rL" inside, on black.
 
 Re-run after changing the drawing:  python3 tool/make_icon.py
-Writes Android launcher icons (adaptive + legacy square/round), the Android TV banner and a Linux icon.
+Writes Android launcher icons (adaptive + legacy square/round), the Android TV banner, a Linux icon and the Windows .ico.
 Needs Pillow and the DejaVu Sans Bold font (Debian/Ubuntu: fonts-dejavu-core).
 """
 from pathlib import Path
@@ -91,6 +91,8 @@ def main():
 
     linux = ROOT / "linux/relivetv.png"
     tv(256, 0.7, BLACK).save(linux)
+    tv(256, 0.7, BLACK).save(ROOT / "windows/runner/resources/app_icon.ico",
+                             sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
     print("icons written")
 
 

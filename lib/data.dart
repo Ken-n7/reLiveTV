@@ -120,11 +120,12 @@ class CatalogStore {
   }
 }
 
-/// Folder for re-downloadable data: Android's app-private cache dir, else the
-/// XDG cache dir (~/.cache/relivetv on Linux).
+/// Folder for re-downloadable data: Android's app-private cache dir,
+/// %LOCALAPPDATA%\\relivetv on Windows, else the XDG cache dir (~/.cache/relivetv on Linux).
 Future<Directory> cacheRoot() async {
   if (Platform.isAndroid) return Directory((await platform.invokeMethod<String>('cacheDir'))!);
   final env = Platform.environment;
+  if (Platform.isWindows) return Directory('${env['LOCALAPPDATA'] ?? Directory.systemTemp.path}\\relivetv');
   final base = env['XDG_CACHE_HOME'] ?? '${env['HOME'] ?? Directory.systemTemp.path}/.cache';
   return Directory('$base/relivetv');
 }
